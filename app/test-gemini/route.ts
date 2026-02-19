@@ -14,7 +14,7 @@ export async function GET() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: "רשום 3 אירועי שריפות סוללות ליתיום מאופניים חשמליים שקרו בישראל ב-2024. החזר JSON array עם incident_date, city, description. בלי markdown." }] }],
+          contents: [{ parts: [{ text: "List 3 lithium battery fire incidents in Israel in 2024. Return JSON array with incident_date, city, description. No markdown." }] }],
           generationConfig: { temperature: 0.3, maxOutputTokens: 2048 },
         }),
       }
@@ -34,8 +34,6 @@ export async function GET() {
 }
 ```
 
-4. **Commit**
-
-חכה דקה ואז גלוש ל:
+**Commit** → חכה דקה → נסה:
 ```
 https://lithium-fire-dashboard.vercel.app/api/test-gemini
