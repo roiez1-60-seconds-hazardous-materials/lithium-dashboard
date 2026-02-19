@@ -259,7 +259,7 @@ export default function LithiumDashboard() {
     { id: "system", icon: "⚙", label: "מערכת" },
   ];
 
-  const tip = { contentStyle: { background: "#1c1917", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, direction: "rtl", fontSize: 12, fontFamily: "sans-serif" }, labelStyle: { color: "#fafaf9" } };
+  const tip = { contentStyle: { background: "#1c1917", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14,  fontSize: 12, fontFamily: "sans-serif" }, labelStyle: { color: "#fafaf9" } };
 
   return (
     <div style={{
@@ -267,7 +267,6 @@ export default function LithiumDashboard() {
       background: "linear-gradient(175deg, #1a0c02 0%, #0d0d0d 25%, #111010 60%, #0a0a0a 100%)",
       color: "#fafaf9",
       fontFamily: "'Rubik', -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif",
-      direction: "rtl",
       maxWidth: 430,
       margin: "0 auto",
       position: "relative",
