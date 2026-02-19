@@ -7,7 +7,7 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 
 async function askGemini(prompt: string): Promise<string> {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=" + GEMINI_KEY,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -54,33 +54,35 @@ export async function GET(request: Request) {
     { label: "second", months: "יולי, אוגוסט, ספטמבר, אוקטובר, נובמבר, דצמבר" },
   ];
 
-  const allResults: any[] = [];
-  let totalInserted = 0;
-  let totalDuplicates = 0;
-  const debugInfo: any[] = [];
+  var allResults: any[] = [];
+  var totalInserted = 0;
+  var totalDuplicates = 0;
+  var debugInfoArr: any[] = [];
 
-  for (const half of halves) {
-    const prompt = "רשום אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודשים " + half.months + " " + year + ".\n\nכלול: שריפות אופניים חשמליים, קורקינטים, רכבים חשמליים, קלנועיות, טלפונים, פאוורבנקים, UPS.\nלא לכלול: תאונות דרכים רגילות, גניבות, חקיקה.\nרק אירועים אמיתיים שדווחו בתקשורת!\n\nהחזר JSON array בלבד (בלי markdown, בלי backticks):\n[{\"incident_date\":\"YYYY-MM-DD\",\"city\":\"עיר\",\"district\":\"דן/מרכז/חוף/ירושלים/דרום/צפון\",\"device_type\":\"אופניים חשמליים\",\"severity\":\"חמור\",\"injuries\":0,\"fatalities\":0,\"property_damage\":true,\"description\":\"תיאור קצר\",\"source_name\":\"ynet\",\"source_url\":\"\"}]";
+  for (var i = 0; i < halves.length; i++) {
+    var half = halves[i];
+    var prompt = "רשום אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודשים " + half.months + " " + year + ". כלול: שריפות אופניים חשמליים, קורקינטים, רכבים חשמליים, קלנועיות, טלפונים, פאוורבנקים, UPS. לא לכלול: תאונות דרכים רגילות, גניבות, חקיקה. רק אירועים אמיתיים שדווחו בתקשורת הישראלית! החזר JSON array בלבד בלי markdown בלי backticks: [{\"incident_date\":\"YYYY-MM-DD\",\"city\":\"עיר\",\"district\":\"דן/מרכז/חוף/ירושלים/דרום/צפון\",\"device_type\":\"אופניים חשמליים\",\"severity\":\"חמור\",\"injuries\":0,\"fatalities\":0,\"property_damage\":true,\"description\":\"תיאור קצר\",\"source_name\":\"ynet\",\"source_url\":\"\"}]";
 
-    const raw = await askGemini(prompt);
+    var raw = await askGemini(prompt);
 
     if (debug) {
-      debugInfo.push({ year: year, half: half.label, raw_response: raw.substring(0, 1500) });
+      debugInfoArr.push({ year: year, half: half.label, raw_response: raw.substring(0, 1500) });
     }
 
     try {
-      const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+      var cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      var jsonMatch = cleaned.match(/\[[\s\S]*\]/);
       if (!jsonMatch) continue;
-      const incidents = JSON.parse(jsonMatch[0]);
+      var incidents = JSON.parse(jsonMatch[0]);
       if (!Array.isArray(incidents)) continue;
 
-      for (const inc of incidents) {
+      for (var j = 0; j < incidents.length; j++) {
+        var inc = incidents[j];
         if (!inc.incident_date || !inc.city || !inc.device_type) continue;
-        const isDup = await checkDuplicate(inc);
+        var isDup = await checkDuplicate(inc);
         if (isDup) { totalDuplicates++; continue; }
 
-        const row = {
+        var row = {
           incident_date: inc.incident_date,
           city: inc.city,
           district: inc.district || "אחר",
@@ -88,7 +90,7 @@ export async function GET(request: Request) {
           severity: inc.severity || "בינוני",
           injuries: inc.injuries || 0,
           fatalities: inc.fatalities || 0,
-          property_damage: inc.property_damage ?? true,
+          property_damage: inc.property_damage !== false,
           description: inc.description || "",
           source_name: inc.source_name || "",
           source_url: inc.source_url || "",
@@ -97,7 +99,7 @@ export async function GET(request: Request) {
           verified: false,
         };
 
-        const res = await fetch(SUPABASE_URL + "/rest/v1/incidents", {
+        var insertRes = await fetch(SUPABASE_URL + "/rest/v1/incidents", {
           method: "POST",
           headers: {
             apikey: SUPABASE_SERVICE_KEY,
@@ -107,7 +109,7 @@ export async function GET(request: Request) {
           },
           body: JSON.stringify(row),
         });
-        if (res.ok) totalInserted++;
+        if (insertRes.ok) totalInserted++;
       }
 
       allResults.push({ year: year, half: half.label, found: incidents.length });
@@ -118,7 +120,7 @@ export async function GET(request: Request) {
     await new Promise(function(r) { setTimeout(r, 1000); });
   }
 
-  const result: any = {
+  var result: any = {
     status: "ok",
     year: year,
     total_inserted: totalInserted,
@@ -128,7 +130,7 @@ export async function GET(request: Request) {
   };
 
   if (debug) {
-    result.debug = debugInfo;
+    result.debug = debugInfoArr;
   }
 
   return Response.json(result);
