@@ -11,55 +11,37 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || "";
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 
 async function searchWithGemini(year: number, half: string): Promise<any[]> {
-  const months = half === "first" ? "ינואר עד יוני" : "יולי עד דצמבר";
-  const monthRange = half === "first" ? "January-June" : "July-December";
+  const months = half === "first" 
+    ? ["ינואר","פברואר","מרץ","אפריל","מאי","יוני"] 
+    : ["יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
 
-  const prompt = `אתה חוקר מסד נתונים של שריפות סוללות ליתיום בישראל.
+  const prompt = `רשום את כל אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודשים ${months.join(", ")} ${year}.
 
-חפש אירועי שריפה/התלקחות/פיצוץ של סוללות ליתיום בישראל בתקופה: ${months} ${year} (${monthRange} ${year}).
+אירועים ידועים שדווחו בתקשורת הישראלית (ynet, כלכליסט, הארץ, וואלה, מעריב, מאקו, חי פה, חדשות 13, חדשות 12, כבאות והצלה).
 
-חפש ב: ynet, כלכליסט, הארץ, וואלה, מעריב, מאקו, חי פה, חדשות 13, חדשות 12, Times of Israel, כבאות והצלה.
+כלול: שריפות אופניים חשמליים, קורקינטים, רכבים חשמליים (שהסוללה נדלקה), קלנועיות, טלפונים, פאוורבנקים, UPS.
+לא לכלול: תאונות דרכים רגילות, גניבות, חקיקה, כתבות כלליות.
 
-סוגי אירועים לחפש:
-- שריפות/פיצוצים של אופניים חשמליים, קורקינטים חשמליים
-- שריפות רכבים חשמליים (רק אם הסוללה נדלקה, לא תאונת דרכים רגילה)
-- התלקחות טלפונים ניידים, מחשבים ניידים, פאוורבנקים
-- שריפות UPS, מערכות גיבוי, מתקני אגירת אנרגיה
-- שריפות קלנועיות חשמליות
+חשוב: ציין רק אירועים שאתה בטוח שקרו! אם אתה יודע על אירוע אמיתי — כלול אותו עם התאריך המדויק ככל הניתן.
 
-לא לכלול:
-- תאונות דרכים רגילות עם רכב חשמלי (אלא אם הסוללה עצמה נדלקה)
-- גניבות, מכירות, חקיקה, כתבות כלליות
-- אירועים מחוץ לישראל
-
-חשוב מאוד: רק אירועים אמיתיים שבאמת קרו! לא להמציא אירועים!
-אם אתה לא בטוח שאירוע קרה — אל תכלול אותו.
-
-עבור כל אירוע שמצאת, החזר:
-{
+החזר JSON array:
+[{
   "incident_date": "YYYY-MM-DD",
-  "city": "שם העיר בעברית",
+  "city": "עיר בעברית",
   "district": "צפון/חוף/דן/מרכז/ירושלים/יו״ש/דרום",
   "device_type": "אופניים חשמליים/קורקינט חשמלי/רכב חשמלי/טלפון נייד/מחשב נייד/UPS/גיבוי/סוללת כוח/כלי עבודה/אחר",
   "severity": "קל/בינוני/חמור/קריטי",
   "injuries": 0,
   "fatalities": 0,
   "property_damage": true,
-  "description": "תיאור קצר של האירוע בעברית — מה קרה, איפה, מה נשרף",
-  "source_name": "שם המקור (ynet/כלכליסט/וכו)",
-  "source_url": "קישור לכתבה אם ידוע, אחרת ריק"
-}
+  "description": "תיאור קצר בעברית",
+  "source_name": "שם המקור",
+  "source_url": ""
+}]
 
-מיפוי מחוזות:
-- דן: תל אביב, רמת גן, בני ברק, חולון, בת ים, פתח תקווה, הרצליה, רעננה, כפר סבא, הוד השרון, גבעתיים, קריית אונו
-- מרכז: ראשון לציון, רחובות, נס ציונה, יבנה, לוד, רמלה, מודיעין, שוהם, כפר יונה
-- חוף: חיפה, נתניה, חדרה, קריות, עכו, נהריה
-- ירושלים: ירושלים, בית שמש, מעלה אדומים, ביתר עילית, מודיעין עילית
-- דרום: באר שבע, אשדוד, אשקלון, קריית גת, אילת, ערד, דימונה
-- צפון: טבריה, נצרת, עפולה, כרמיאל, צפת, קצרין, מגדל העמק, יקנעם
-- יו"ש: אריאל, מעלה אדומים (אם לא ירושלים), ביתר עילית, אלפי מנשה
+מיפוי מחוזות: דן=תל אביב/רמת גן/בני ברק/חולון/בת ים/פתח תקווה/הרצליה, מרכז=ראשון לציון/רחובות/לוד/רמלה/מודיעין, חוף=חיפה/נתניה/חדרה/עכו/נהריה, ירושלים=ירושלים/בית שמש, דרום=באר שבע/אשדוד/אשקלון/אילת, צפון=טבריה/נצרת/עפולה/כרמיאל/צפת
 
-החזר JSON array בלבד. אם לא מצאת אירועים אמיתיים, החזר [].`;
+החזר רק JSON array, בלי טקסט נוסף, בלי markdown.`;
 
   try {
     const res = await fetch(
@@ -69,42 +51,21 @@ async function searchWithGemini(year: number, half: string): Promise<any[]> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
-          tools: [{ google_search_retrieval: { dynamic_retrieval_config: { mode: "MODE_DYNAMIC" } } }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
         }),
       }
     );
 
-    if (!res.ok) {
-      const errText = await res.text();
-      // If grounding fails, retry without search tool (use model knowledge)
-      const fallbackRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
-          }),
-        }
-      );
-      if (!fallbackRes.ok) return [];
-      const fallbackData = await fallbackRes.json();
-      const fallbackText = fallbackData.candidates?.[0]?.content?.parts
-        ?.map((p: any) => p.text || "").join("") || "[]";
-      const fallbackMatch = fallbackText.match(/\[[\s\S]*\]/);
-      if (!fallbackMatch) return [];
-      const fallbackParsed = JSON.parse(fallbackMatch[0]);
-      return Array.isArray(fallbackParsed) ? fallbackParsed : [];
-    }
+    if (!res.ok) return [];
 
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts
       ?.map((p: any) => p.text || "")
       .join("") || "[]";
 
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    // Clean markdown fences if present
+    const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return [];
 
     const parsed = JSON.parse(jsonMatch[0]);
