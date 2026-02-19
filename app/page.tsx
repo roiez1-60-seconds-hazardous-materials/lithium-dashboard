@@ -1,63 +1,19 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
+import { createClient } from "@supabase/supabase-js";
 
 // ==============================================
-// REAL DATA from Israeli Fire & Rescue Services
-// Sources: כבאות והצלה, כלכליסט, ynet, הארץ, וואלה,
-// מעריב, גלובס, מאקו, חי פה, NWS, ניוזים, JDN,
-// כיכר השבת, חדשות 13/12, Times of Israel
+// SUPABASE CONNECTION
 // ==============================================
-const YEARLY = [
-  { y: "'19", fires: 140, deaths: 2, injuries: 18 },
-  { y: "'20", fires: 184, deaths: 3, injuries: 22 },
-  { y: "'21", fires: 212, deaths: 5, injuries: 31 },
-  { y: "'22", fires: 224, deaths: 4, injuries: 28 },
-  { y: "'23", fires: 232, deaths: 5, injuries: 35 },
-  { y: "'24", fires: 389, deaths: 7, injuries: 55 },
-  { y: "'25", fires: 310, deaths: 5, injuries: 42 },
-  { y: "'26*", fires: 12, deaths: 0, injuries: 2 },
-];
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-const DEVICE_PIE = [
-  { n: "אופניים חשמליים", v: 520, c: "#f59e0b" },
-  { n: "קורקינט", v: 210, c: "#f97316" },
-  { n: "רכב חשמלי", v: 155, c: "#ef4444" },
-  { n: "קלנועית", v: 68, c: "#fb923c" },
-  { n: "טלפון / טאבלט", v: 45, c: "#60a5fa" },
-  { n: "סוללת גיבוי / UPS / פאוורבנק", v: 38, c: "#34d399" },
-  { n: "מתקן אגירה (ESS)", v: 8, c: "#a78bfa" },
-  { n: "אחר", v: 35, c: "#94a3b8" },
-];
-
-const MONTHLY = {
-  2022: [
-    { m: "ינו", v: 14 }, { m: "פבר", v: 13 }, { m: "מרץ", v: 16 }, { m: "אפר", v: 18 },
-    { m: "מאי", v: 20 }, { m: "יונ", v: 24 }, { m: "יול", v: 28 }, { m: "אוג", v: 25 },
-    { m: "ספט", v: 21 }, { m: "אוק", v: 19 }, { m: "נוב", v: 15 }, { m: "דצמ", v: 11 },
-  ],
-  2023: [
-    { m: "ינו", v: 15 }, { m: "פבר", v: 14 }, { m: "מרץ", v: 17 }, { m: "אפר", v: 20 },
-    { m: "מאי", v: 22 }, { m: "יונ", v: 26 }, { m: "יול", v: 30 }, { m: "אוג", v: 27 },
-    { m: "ספט", v: 22 }, { m: "אוק", v: 20 }, { m: "נוב", v: 17 }, { m: "דצמ", v: 12 },
-  ],
-  2024: [
-    { m: "ינו", v: 24 }, { m: "פבר", v: 22 }, { m: "מרץ", v: 30 }, { m: "אפר", v: 33 },
-    { m: "מאי", v: 36 }, { m: "יונ", v: 42 }, { m: "יול", v: 45 }, { m: "אוג", v: 41 },
-    { m: "ספט", v: 35 }, { m: "אוק", v: 32 }, { m: "נוב", v: 27 }, { m: "דצמ", v: 22 },
-  ],
-  2025: [
-    { m: "ינו", v: 26 }, { m: "פבר", v: 24 }, { m: "מרץ", v: 28 }, { m: "אפר", v: 30 },
-    { m: "מאי", v: 33 }, { m: "יונ", v: 38 }, { m: "יול", v: 42 }, { m: "אוג", v: 36 },
-    { m: "ספט", v: 28 }, { m: "אוק", v: 25 }, { m: "נוב", v: 21 }, { m: "דצמ", v: 19 },
-  ],
-  2026: [
-    { m: "ינו", v: 22 }, { m: "פבר", v: 18 }, { m: "מרץ", v: 0 }, { m: "אפר", v: 0 },
-    { m: "מאי", v: 0 }, { m: "יונ", v: 0 }, { m: "יול", v: 0 }, { m: "אוג", v: 0 },
-    { m: "ספט", v: 0 }, { m: "אוק", v: 0 }, { m: "נוב", v: 0 }, { m: "דצמ", v: 0 },
-  ],
-};
-
+// ==============================================
+// STATIC DATA (causes, districts — these don't come from DB)
+// ==============================================
 const CAUSES = [
   { name: "טעינת יתר", pct: 34, col: "#ef4444" },
   { name: "סוללה לא מקורית", pct: 22, col: "#f97316" },
@@ -67,60 +23,135 @@ const CAUSES = [
   { name: "אחר / לא ידוע", pct: 6, col: "#94a3b8" },
 ];
 
-// Real documented incidents from Israeli news
-const INCIDENTS = [
-  { id: 1, date: "05.10.2024", city: "תל אביב", district: "דן", type: "קלנועית", icon: "🏍️", sev: "קריטית", sevC: "#ef4444", d: 1, i: 1, desc: "ילד בן 10 נהרג מפיצוץ קלנועית ברחוב שינקין. אימו נפצעה", src: "כלל המקורות" },
-  { id: 2, date: "23.09.2024", city: "פתח תקווה", district: "דן", type: "אופניים", icon: "🚲", sev: "קריטית", sevC: "#ef4444", d: 1, i: 1, desc: "נער בן 12 נהרג משריפת סוללת אופניים חשמליים בבניין מגורים", src: "כלכליסט" },
-  { id: 3, date: "25.10.2024", city: "חיפה", district: "חיפה", type: "רכב חשמלי", icon: "🚗", sev: "גבוהה", sevC: "#f97316", d: 0, i: 2, desc: "סוללת רכב חשמלי הועפה מפגיעת טיל בנווה שאנן", src: "כלכליסט" },
-  { id: 4, date: "28.11.2024", city: "רמת גן", district: "דן", type: "אופניים", icon: "🚲", sev: "קריטית", sevC: "#ef4444", d: 1, i: 3, desc: "פיצוץ סוללה בזמן טעינה. אדם נהרג, 3 נפצעו. דירה הושמדה", src: "כבאות והצלה" },
-  { id: 5, date: "15.01.2025", city: "פתח תקווה", district: "דן", type: "אופניים", icon: "🚲", sev: "קריטית", sevC: "#ef4444", d: 1, i: 2, desc: "שריפה בדירת מגורים מטעינת סוללה. הרוג אחד", src: "חדשות 13" },
-  { id: 6, date: "22.01.2025", city: "נתניה", district: "מרכז", type: "קורקינט", icon: "🛴", sev: "גבוהה", sevC: "#f97316", d: 0, i: 2, desc: "סוללת קורקינט התפוצצה בחדר שינה של נער", src: "כבאות והצלה" },
-  { id: 7, date: "28.01.2025", city: "באר שבע", district: "דרום", type: "סוללת גיבוי", icon: "🔋", sev: "גבוהה", sevC: "#f97316", d: 0, i: 1, desc: "סוללת גיבוי (UPS) ביתית התלקחה", src: "כבאות והצלה" },
-  { id: 8, date: "01.11.2022", city: "כרמיאל", district: "צפון", type: "אופניים", icon: "🚲", sev: "גבוהה", sevC: "#f97316", d: 0, i: 0, desc: "סוללת ליתיום התלקחה במרתף בית בזמן טעינה", src: "מאקו" },
-  { id: 9, date: "01.11.2022", city: "פתח תקווה", district: "דן", type: "אופניים", icon: "🚲", sev: "בינונית", sevC: "#eab308", d: 0, i: 0, desc: "אירוע ה-13 עם סוללות ליתיום ב-9 חודשים באזור פ\"ת", src: "כבאות מחוז מרכז" },
-];
+// Device type → color + icon mapping
+const DEVICE_META: Record<string, { icon: string; color: string }> = {
+  "אופניים חשמליים": { icon: "🚲", color: "#f59e0b" },
+  "קורקינט חשמלי": { icon: "🛴", color: "#f97316" },
+  "רכב חשמלי": { icon: "🚗", color: "#ef4444" },
+  "טלפון נייד": { icon: "📱", color: "#60a5fa" },
+  "מחשב נייד": { icon: "💻", color: "#818cf8" },
+  "UPS/גיבוי": { icon: "🔋", color: "#34d399" },
+  "סוללת כוח": { icon: "🔋", color: "#2dd4bf" },
+  "כלי עבודה": { icon: "🔧", color: "#a78bfa" },
+  "אחר": { icon: "⚡", color: "#94a3b8" },
+};
 
-const DISTRICTS = [
-  { n: "דן", pct: 50 }, { n: "מרכז", pct: 18 }, { n: "חיפה", pct: 14 },
-  { n: "ירושלים", pct: 12 }, { n: "דרום", pct: 9 }, { n: "צפון", pct: 7 },
-];
+const SEVERITY_COLOR: Record<string, string> = {
+  "קל": "#22c55e",
+  "בינוני": "#eab308",
+  "חמור": "#f97316",
+  "קריטי": "#ef4444",
+};
+
+// District name mapping for DB
+const DISTRICT_ORDER = ["דן", "מרכז", "חוף", "ירושלים", "דרום", "צפון", "יו\"ש"];
 
 // ==============================================
-// ISRAEL MAP — d3 GeoJSON projection for accurate borders
+// HELPER: Process raw incidents into dashboard data
 // ==============================================
-function IsraelMap({ incidents }) {
-  
-  // Israel polygon based on Natural Earth GeoJSON (glynnbird/countriesgeojson)
-  // Modified: eastern border expanded to include Judea & Samaria + Golan Heights
-  // Original 16 NE points + expanded eastern sections
+function processIncidents(incidents: any[]) {
+  // Yearly aggregation
+  const yearMap: Record<number, { fires: number; deaths: number; injuries: number }> = {};
+  incidents.forEach(inc => {
+    const yr = new Date(inc.incident_date).getFullYear();
+    if (!yearMap[yr]) yearMap[yr] = { fires: 0, deaths: 0, injuries: 0 };
+    yearMap[yr].fires++;
+    yearMap[yr].deaths += inc.fatalities || 0;
+    yearMap[yr].injuries += inc.injuries || 0;
+  });
+
+  const currentYear = new Date().getFullYear();
+  const years = Object.keys(yearMap).map(Number).sort();
+  const YEARLY = years.map(yr => ({
+    y: yr === currentYear ? `'${String(yr).slice(2)}*` : `'${String(yr).slice(2)}`,
+    year: yr,
+    fires: yearMap[yr].fires,
+    deaths: yearMap[yr].deaths,
+    injuries: yearMap[yr].injuries,
+  }));
+
+  // Device pie
+  const deviceMap: Record<string, number> = {};
+  incidents.forEach(inc => {
+    const dt = inc.device_type || "אחר";
+    deviceMap[dt] = (deviceMap[dt] || 0) + 1;
+  });
+  const DEVICE_PIE = Object.entries(deviceMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => ({
+      n: name,
+      v: count,
+      c: DEVICE_META[name]?.color || "#94a3b8",
+    }));
+
+  // Monthly by year
+  const MONTHLY: Record<number, { m: string; v: number }[]> = {};
+  const monthNames = ["ינו", "פבר", "מרץ", "אפר", "מאי", "יונ", "יול", "אוג", "ספט", "אוק", "נוב", "דצמ"];
+  years.forEach(yr => {
+    const monthCounts = new Array(12).fill(0);
+    incidents.forEach(inc => {
+      const d = new Date(inc.incident_date);
+      if (d.getFullYear() === yr) monthCounts[d.getMonth()]++;
+    });
+    MONTHLY[yr] = monthNames.map((m, i) => ({ m, v: monthCounts[i] }));
+  });
+
+  // District distribution
+  const districtMap: Record<string, number> = {};
+  incidents.forEach(inc => {
+    const d = inc.district || "אחר";
+    districtMap[d] = (districtMap[d] || 0) + 1;
+  });
+  const total = incidents.length;
+  const DISTRICTS = Object.entries(districtMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([n, count]) => ({ n, pct: Math.round(count / total * 100) }));
+
+  // Recent notable incidents for list view
+  const INCIDENTS_LIST = incidents
+    .sort((a, b) => new Date(b.incident_date).getTime() - new Date(a.incident_date).getTime())
+    .slice(0, 50)
+    .map((inc, i) => ({
+      id: inc.id,
+      date: new Date(inc.incident_date).toLocaleDateString("he-IL"),
+      city: inc.city,
+      district: inc.district,
+      type: inc.device_type,
+      icon: DEVICE_META[inc.device_type]?.icon || "⚡",
+      sev: inc.severity || "בינוני",
+      sevC: SEVERITY_COLOR[inc.severity] || "#eab308",
+      d: inc.fatalities || 0,
+      i: inc.injuries || 0,
+      desc: inc.description || "",
+      src: inc.source_name || "כבאות והצלה",
+      verified: inc.verified,
+    }));
+
+  return { YEARLY, DEVICE_PIE, MONTHLY, DISTRICTS, INCIDENTS_LIST, years };
+}
+
+// ==============================================
+// ISRAEL MAP
+// ==============================================
+function IsraelMap({ incidents }: { incidents: any[] }) {
   const israelCoords = [
-    // Northern border — from NE data + Golan extension
     [35.10, 33.08], [35.13, 33.09], [35.46, 33.09],
-    // Golan Heights
     [35.55, 33.26], [35.82, 33.28], [35.84, 32.87],
-    // Back to NE point — upper Jordan Valley  
     [35.72, 32.71],
-    // Eastern border — expanded for Judea & Samaria
     [35.55, 32.39],
-    [35.57, 32.10], // Alon road / Jordan Valley
-    [35.55, 31.87], // North Dead Sea
-    [35.53, 31.75], // Jericho area  
-    [35.50, 31.49], // Dead Sea east shore
-    [35.42, 31.10], // South Dead Sea — NE original point
-    // Negev — NE original
+    [35.57, 32.10], [35.55, 31.87], [35.53, 31.75],
+    [35.50, 31.49], [35.42, 31.10],
     [34.92, 29.50],
-    // Coast — NE original points (south to north)
     [34.27, 31.22], [34.56, 31.55], [34.49, 31.61],
     [34.75, 32.07], [34.96, 32.83],
-    // Back to start
     [35.10, 33.08],
   ];
 
   const W = 155, H = 440;
   const center = [35.05, 31.4];
   const scale = 3600;
-  
-  const project = (lng, lat) => {
+
+  const project = (lng: number, lat: number) => {
     const x = W/2 + (lng - center[0]) * scale / 100;
     const latRad = lat * Math.PI / 180;
     const centerRad = center[1] * Math.PI / 180;
@@ -133,44 +164,39 @@ function IsraelMap({ incidents }) {
     return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ") + "Z";
 
-  // City positions + realistic heat weights based on district statistics
-  // Heat weight = approximate relative fire incident count (all years combined)
-  // City heat weights — estimated cumulative incidents ALL YEARS (2019-2026)
-  // Based on district distribution: Dan 50%, Merkaz 18%, Haifa 14%, Jerusalem 12%, South 9%, North 7%
-  // Total ~1,700 incidents over all years, distributed proportionally by city population within district
-  const cityData = {
-    "תל אביב": { lng: 34.77, lat: 32.07, heat: 95 },
-    "פתח תקווה": { lng: 34.89, lat: 32.09, heat: 55 },
-    "רמת גן": { lng: 34.82, lat: 32.07, heat: 40 },
-    "חולון": { lng: 34.78, lat: 32.02, heat: 30 },
-    "נתניה": { lng: 34.85, lat: 32.32, heat: 25 },
-    "חיפה": { lng: 34.99, lat: 32.79, heat: 45 },
-    "קריית אתא": { lng: 35.10, lat: 32.81, heat: 15 },
-    "ירושלים": { lng: 35.21, lat: 31.77, heat: 35 },
-    "באר שבע": { lng: 34.79, lat: 31.25, heat: 22 },
-    "אשדוד": { lng: 34.65, lat: 31.80, heat: 18 },
-    "כרמיאל": { lng: 35.30, lat: 32.91, heat: 10 },
-    "אילת": { lng: 34.94, lat: 29.56, heat: 5 },
-    "ביתר עילית": { lng: 35.12, lat: 31.70, heat: 4 },
-    "מעלה אדומים": { lng: 35.30, lat: 31.75, heat: 6 },
-    "אריאל": { lng: 35.17, lat: 32.10, heat: 5 },
-    "מודיעין עילית": { lng: 35.04, lat: 31.93, heat: 8 },
-    "טבריה": { lng: 35.53, lat: 32.79, heat: 7 },
-    "עכו": { lng: 35.07, lat: 32.93, heat: 8 },
-    "צפת": { lng: 35.50, lat: 32.96, heat: 4 },
-    "קצרין": { lng: 35.69, lat: 32.99, heat: 3 },
+  // Build heat from actual incident city counts
+  const cityHeat: Record<string, number> = {};
+  incidents.forEach(inc => {
+    cityHeat[inc.city] = (cityHeat[inc.city] || 0) + 1;
+  });
+
+  const cityCoords: Record<string, [number, number]> = {
+    "תל אביב": [34.77, 32.07], "פתח תקווה": [34.89, 32.09], "רמת גן": [34.82, 32.07],
+    "חולון": [34.78, 32.02], "נתניה": [34.85, 32.32], "חיפה": [34.99, 32.79],
+    "ירושלים": [35.21, 31.77], "באר שבע": [34.79, 31.25], "אשדוד": [34.65, 31.80],
+    "ראשון לציון": [34.80, 31.97], "בני ברק": [34.83, 32.08], "בת ים": [34.75, 32.02],
+    "הרצליה": [34.79, 32.16], "כפר סבא": [34.91, 32.18], "רעננה": [34.87, 32.19],
+    "לוד": [34.90, 31.95], "רמלה": [34.87, 31.93], "אשקלון": [34.57, 31.67],
+    "עכו": [35.07, 32.93], "נצרת": [35.30, 32.70], "עפולה": [35.29, 32.61],
+    "כרמיאל": [35.30, 32.91], "טבריה": [35.53, 32.79], "אילת": [34.94, 29.56],
+    "רחובות": [34.81, 31.90], "יבנה": [34.74, 31.88], "חדרה": [34.92, 32.44],
+    "קריית גת": [34.76, 31.61], "הוד השרון": [34.89, 32.15], "נהריה": [35.10, 33.00],
   };
 
-  const maxHeat = Math.max(...Object.values(cityData).map(c => c.heat));
+  const maxHeat = Math.max(...Object.values(cityHeat), 1);
+
+  const cityData = Object.entries(cityHeat).map(([name, heat]) => ({
+    name,
+    coords: cityCoords[name],
+    heat,
+  })).filter(c => c.coords);
 
   return (
     <svg viewBox={`-5 -5 ${W+10} ${H+10}`} style={{ width: "100%", maxHeight: 460 }}>
       <defs>
         <clipPath id="israelClip"><path d={pathD} /></clipPath>
-        {/* Heat gradients per city */}
-        {Object.entries(cityData).filter(([,c]) => c.heat > 0).map(([name, c]) => {
+        {cityData.map(c => {
           const intensity = c.heat / maxHeat;
-          // Green → Yellow → Orange → Red based on intensity
           let core, mid;
           if (intensity > 0.7) { core = "#dc2626"; mid = "#ef4444"; }
           else if (intensity > 0.5) { core = "#ea580c"; mid = "#f97316"; }
@@ -178,7 +204,7 @@ function IsraelMap({ incidents }) {
           else if (intensity > 0.15) { core = "#ca8a04"; mid = "#eab308"; }
           else { core = "#65a30d"; mid = "#84cc16"; }
           return (
-            <radialGradient key={`g-${name}`} id={`hg-${name.replace(/[\s\/]/g,'')}`} cx="50%" cy="50%" r="50%">
+            <radialGradient key={`g-${c.name}`} id={`hg-${c.name.replace(/[\s\/\"]/g,'')}`} cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor={core} stopOpacity={0.85} />
               <stop offset="40%" stopColor={mid} stopOpacity={0.55} />
               <stop offset="75%" stopColor={mid} stopOpacity={0.2} />
@@ -188,27 +214,24 @@ function IsraelMap({ incidents }) {
         })}
       </defs>
 
-      {/* Israel — WHITE fill */}
       <path d={pathD} fill="#e8e5e0" stroke="rgba(120,113,108,0.5)" strokeWidth="0.8" strokeLinejoin="round" />
 
-      {/* Heat spots — clipped inside Israel */}
       <g clipPath="url(#israelClip)">
-        {Object.entries(cityData).filter(([,c]) => c.heat > 0).map(([name, c]) => {
-          const [x, y] = project(c.lng, c.lat);
+        {cityData.map(c => {
+          const [x, y] = project(c.coords![0], c.coords![1]);
           const intensity = c.heat / maxHeat;
           const r = 4 + intensity * 14;
           return (
-            <circle key={`heat-${name}`} cx={x} cy={y} r={r}
-              fill={`url(#hg-${name.replace(/[\s\/]/g,'')})`}>
+            <circle key={`heat-${c.name}`} cx={x} cy={y} r={r}
+              fill={`url(#hg-${c.name.replace(/[\s\/\"]/g,'')})`}>
               <animate attributeName="r" values={`${r};${r*1.06};${r}`} dur="5s" repeatCount="indefinite" />
             </circle>
           );
         })}
       </g>
 
-      {/* City labels — outside clipPath, with white outline for readability */}
-      {Object.entries(cityData).map(([name, c]) => {
-        const [x, y] = project(c.lng, c.lat);
+      {Object.entries(cityCoords).map(([name, coords]) => {
+        const [x, y] = project(coords[0], coords[1]);
         const isMain = ["חיפה","תל אביב","ירושלים","באר שבע","אילת"].includes(name);
         if (!isMain) return (
           <circle key={`dot-${name}`} cx={x} cy={y} r="0.7" fill="rgba(28,25,23,0.35)" />
@@ -225,12 +248,11 @@ function IsraelMap({ incidents }) {
         );
       })}
 
-      {/* Legend */}
       <g transform={`translate(${W-42}, ${H-45})`}>
         <text x="0" y="0" fill="rgba(168,162,158,0.6)" fontSize="4" fontFamily="sans-serif" fontWeight="600">עוצמת אירועים</text>
         {[["מעט","#84cc16"],["בינוני","#f59e0b"],["רב","#ef4444"]].map(([lbl,col],i) => (
-          <g key={lbl}>
-            <circle cx="5" cy={10+i*9} r="3.5" fill={col} opacity="0.7" />
+          <g key={String(lbl)}>
+            <circle cx="5" cy={10+i*9} r="3.5" fill={String(col)} opacity="0.7" />
             <text x="12" y={12+i*9} fill="rgba(168,162,158,0.5)" fontSize="3.5">{lbl}</text>
           </g>
         ))}
@@ -244,12 +266,62 @@ function IsraelMap({ incidents }) {
 // ==============================================
 export default function LithiumDashboard() {
   const [tab, setTab] = useState("home");
-  const [selInc, setSelInc] = useState(null);
+  const [selInc, setSelInc] = useState<any>(null);
   const [now, setNow] = useState(new Date());
   const [seasonYear, setSeasonYear] = useState(2024);
-  const [selPie, setSelPie] = useState(null);
+  const [selPie, setSelPie] = useState<string | null>(null);
+  const [rawIncidents, setRawIncidents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dbConnected, setDbConnected] = useState(false);
+  const [lastScan, setLastScan] = useState<string | null>(null);
 
-  useEffect(() => { const t = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(t); }, []);
+  // Fetch from Supabase
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const { data, error } = await supabase
+          .from("incidents")
+          .select("*")
+          .order("incident_date", { ascending: false });
+
+        if (error) throw error;
+        if (data && data.length > 0) {
+          setRawIncidents(data);
+          setDbConnected(true);
+        }
+      } catch (err) {
+        console.error("Supabase error:", err);
+        setDbConnected(false);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function fetchLastScan() {
+      try {
+        const { data } = await supabase
+          .from("scan_log")
+          .select("scan_time, incidents_added")
+          .order("scan_time", { ascending: false })
+          .limit(1);
+        if (data && data.length > 0) {
+          setLastScan(new Date(data[0].scan_time).toLocaleString("he-IL"));
+        }
+      } catch {}
+    }
+
+    fetchData();
+    fetchLastScan();
+
+    const t = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Process data
+  const { YEARLY, DEVICE_PIE, MONTHLY, DISTRICTS, INCIDENTS_LIST, years } = useMemo(
+    () => processIncidents(rawIncidents),
+    [rawIncidents]
+  );
 
   const tabs = [
     { id: "home", icon: "⬡", label: "ראשי" },
@@ -259,7 +331,28 @@ export default function LithiumDashboard() {
     { id: "system", icon: "⚙", label: "מערכת" },
   ];
 
-  const tip = { contentStyle: { background: "#1c1917", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14,  fontSize: 12, fontFamily: "sans-serif" }, labelStyle: { color: "#fafaf9" } };
+  const tip = { contentStyle: { background: "#1c1917", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, fontSize: 12, fontFamily: "sans-serif" }, labelStyle: { color: "#fafaf9" } };
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0a0a0a", color: "#fafaf9", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Rubik', sans-serif" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>🔥</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>טוען נתונים...</div>
+          <div style={{ fontSize: 12, color: "#78716c", marginTop: 6 }}>מתחבר למסד הנתונים</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Current year stats
+  const currentYear = now.getFullYear();
+  const curYearData = YEARLY.find(y => y.year === currentYear);
+  const prevYearData = YEARLY.find(y => y.year === currentYear - 1);
+  const changePct = prevYearData && prevYearData.fires > 0
+    ? Math.round(((curYearData?.fires || 0) - prevYearData.fires) / prevYearData.fires * 100)
+    : 0;
+  const isPartial = true; // current year is always partial until Dec 31
 
   return (
     <div style={{
@@ -273,7 +366,6 @@ export default function LithiumDashboard() {
       overflow: "hidden",
     }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800;900&display=swap');`}</style>
-      {/* Ambient */}
       <div style={{ position: "fixed", top: -100, left: "50%", transform: "translateX(-50%)", width: 500, height: 350, background: "radial-gradient(ellipse, rgba(249,115,22,0.1) 0%, rgba(239,68,68,0.05) 40%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
 
       {/* Header */}
@@ -286,13 +378,14 @@ export default function LithiumDashboard() {
               <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>מעקב שריפות סוללות ליתיום יון</div>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 16, background: "rgba(34,197,94,0.08)" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 10px rgba(34,197,94,0.5)" }} />
-            <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>LIVE</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 16, background: dbConnected ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: dbConnected ? "#22c55e" : "#ef4444", boxShadow: `0 0 10px ${dbConnected ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)"}` }} />
+            <span style={{ fontSize: 11, color: dbConnected ? "#22c55e" : "#ef4444", fontWeight: 600 }}>{dbConnected ? "LIVE DB" : "OFFLINE"}</span>
           </div>
         </div>
         <div style={{ fontSize: 11, color: "#57534e", marginTop: 6 }}>
-          נתונים מבוססים על כבאות והצלה, כלכליסט, ynet, מעריב, מאקו, חי פה, NWS, ניוזים, JDN ועוד • {now.toLocaleDateString("he-IL")}
+          {dbConnected ? `${rawIncidents.length} אירועים במסד הנתונים` : "נתונים סטטיים"} • {now.toLocaleDateString("he-IL")}
+          {lastScan && <span> • סריקה אחרונה: {lastScan}</span>}
         </div>
       </div>
 
@@ -303,42 +396,33 @@ export default function LithiumDashboard() {
         {tab === "home" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {/* Alert */}
-            {(() => {
-              const yr = now.getFullYear();
-              const curKey = `'${String(yr).slice(2)}${yr >= 2026 ? '*' : ''}`;
-              const prevKey = `'${String(yr-1).slice(2)}`;
-              const cur = YEARLY.find(y => y.y === curKey) || YEARLY[YEARLY.length - 1];
-              const prev = YEARLY.find(y => y.y === prevKey) || YEARLY[YEARLY.length - 2];
-              const changePct = prev.fires > 0 ? Math.round((cur.fires - prev.fires) / prev.fires * 100) : 0;
-              const isPartial = yr >= 2026;
-              return (<>
             <div style={{ padding: "12px 14px", borderRadius: 16, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.12)", display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 18 }}>⚠️</span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>נתון מדאיג</div>
-                <div style={{ fontSize: 11, color: "#a8a29e", lineHeight: 1.5 }}>כ-250 שריפות בממוצע לשנה מסוללות ליתיום • {cur.deaths} הרוגים ב-{yr}{isPartial ? " (עד כה)" : ""} • {cur.fires} אירועים</div>
+                <div style={{ fontSize: 11, color: "#a8a29e", lineHeight: 1.5 }}>
+                  {rawIncidents.length} אירועים מתועדים • {curYearData?.deaths || 0} הרוגים ב-{currentYear}{isPartial ? " (עד כה)" : ""} • {curYearData?.fires || 0} שריפות
+                </div>
               </div>
             </div>
 
             {/* Hero */}
             <div style={{ padding: 22, borderRadius: 22, background: "linear-gradient(135deg, rgba(239,68,68,0.12), rgba(249,115,22,0.08), rgba(251,191,36,0.04))", border: "1px solid rgba(249,115,22,0.12)", position: "relative", overflow: "hidden" }}>
               <div style={{ position: "absolute", top: -25, left: -25, width: 100, height: 100, borderRadius: "50%", background: "rgba(249,115,22,0.06)", filter: "blur(25px)" }} />
-              <div style={{ fontSize: 11, color: "#d6d3d1", fontWeight: 500 }}>סה״כ אירועים מתועדים {yr}{isPartial ? " (חלקי)" : ""}</div>
-              <div style={{ fontSize: 52, fontWeight: 900, letterSpacing: -3, lineHeight: 1, marginTop: 4 }}>{cur.fires}</div>
+              <div style={{ fontSize: 11, color: "#d6d3d1", fontWeight: 500 }}>סה״כ אירועים מתועדים {currentYear}{isPartial ? " (חלקי)" : ""}</div>
+              <div style={{ fontSize: 52, fontWeight: 900, letterSpacing: -3, lineHeight: 1, marginTop: 4 }}>{curYearData?.fires || 0}</div>
               <div style={{ display: "flex", gap: 16, marginTop: 14 }}>
-                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#ef4444" }}>{cur.deaths}</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> הרוגים</span></div>
-                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#f97316" }}>{cur.injuries}</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> פצועים</span></div>
-                <div style={{ marginRight: "auto" }}><span style={{ fontSize: 14, fontWeight: 800, color: changePct > 0 ? "#ef4444" : "#34d399" }}>{changePct > 0 ? "▲" : "▼"} {Math.abs(changePct)}%</span><span style={{ fontSize: 10, color: "#78716c", marginRight: 4 }}> מ-{yr-1}</span></div>
+                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#ef4444" }}>{curYearData?.deaths || 0}</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> הרוגים</span></div>
+                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#f97316" }}>{curYearData?.injuries || 0}</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> פצועים</span></div>
+                <div style={{ marginRight: "auto" }}><span style={{ fontSize: 14, fontWeight: 800, color: changePct > 0 ? "#ef4444" : "#34d399" }}>{changePct > 0 ? "▲" : "▼"} {Math.abs(changePct)}%</span><span style={{ fontSize: 10, color: "#78716c", marginRight: 4 }}> מ-{currentYear-1}</span></div>
               </div>
             </div>
-              </>);
-            })()}
 
             {/* Mini stats */}
             <div style={{ display: "flex", gap: 8 }}>
               {[
-                { v: "~250", l: "שריפות/שנה", icon: "🏠", col: "#f97316" },
-                { v: "50%", l: "מחוז דן", icon: "📍", col: "#fbbf24" },
+                { v: `${rawIncidents.length}`, l: "סה״כ אירועים", icon: "🏠", col: "#f97316" },
+                { v: `${DISTRICTS[0]?.pct || 0}%`, l: `${DISTRICTS[0]?.n || ""}`, icon: "📍", col: "#fbbf24" },
                 { v: "34%", l: "טעינת יתר", icon: "🔌", col: "#ef4444" },
               ].map((s, i) => (
                 <div key={i} style={{ flex: 1, padding: "12px 8px", borderRadius: 16, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)", textAlign: "center" }}>
@@ -367,13 +451,13 @@ export default function LithiumDashboard() {
                 </AreaChart>
               </ResponsiveContainer>
               <div style={{ fontSize: 10, color: "#78716c", marginTop: 6, textAlign: "center" }}>
-                * 2026 נתונים חלקיים | מקור: נציבות כבאות והצלה, כלכליסט, ynet, מעריב, NWS, ניוזים, חי פה
+                * {currentYear} נתונים חלקיים | מקור: Supabase DB — {rawIncidents.length} אירועים
               </div>
             </div>
 
             {/* Pie */}
             <div style={{ padding: 18, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>📱 פילוח שריפות רב שנתי לפי סוג המכשיר</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>📱 פילוח שריפות לפי סוג המכשיר</div>
               {selPie && <div style={{ fontSize: 13, color: DEVICE_PIE.find(d=>d.n===selPie)?.c || "#f97316", fontWeight: 700, marginTop: 4 }}>{selPie}</div>}
               <div style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
                 <ResponsiveContainer width="45%" height={130}>
@@ -406,20 +490,20 @@ export default function LithiumDashboard() {
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🧠 ניתוח מגמה חכם</div>
               <div style={{ fontSize: 12, color: "#d6d3d1", lineHeight: 1.8 }}>
                 <div style={{ marginBottom: 8 }}>
-                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>עלייה חדה</span>
-                  עלייה של <strong style={{ color: "#f97316" }}>68%</strong> בשריפות בין 2023 ל-2024 (232→389). הקפיצה חריגה ביחס לקצב הגידול השנתי הממוצע (~15%).
+                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>מסד נתונים</span>
+                  <strong style={{ color: "#f97316" }}>{rawIncidents.length}</strong> אירועים מתועדים ב-DB. נתונים מ-{years[0] || "?"} עד {currentYear}.
                 </div>
                 <div style={{ marginBottom: 8 }}>
                   <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(249,115,22,0.1)", color: "#fdba74", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>מגמה מחזורית</span>
-                  יוני-אוגוסט מהווים ~33% מהאירועים השנתיים. טמפרטורות מעל 35°C מגבירות סיכון ל-thermal runaway בסוללות (NFPA Research, 2023).
+                  יוני-אוגוסט מהווים ~33% מהאירועים השנתיים. טמפרטורות מעל 35°C מגבירות סיכון ל-thermal runaway.
                 </div>
                 <div style={{ marginBottom: 8 }}>
                   <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(251,191,36,0.1)", color: "#fde68a", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>מיקוד גאוגרפי</span>
-                  ~50% מהאירועים במחוז דן. צפיפות אוכלוסין גבוהה + ריכוז שימוש באופניים חשמליים.
+                  {DISTRICTS[0] && <>~{DISTRICTS[0].pct}% מהאירועים ב{DISTRICTS[0].n}. צפיפות אוכלוסין + ריכוז שימוש באופניים חשמליים.</>}
                 </div>
                 <div>
-                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(96,165,250,0.1)", color: "#93c5fd", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>תחזית</span>
-                  בהנחת המשך מגמה: צפי ל-<strong style={{ color: "#f97316" }}>350-420</strong> אירועים ב-2026. שיא צפוי ביולי-אוגוסט.
+                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", color: "#93c5fd", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>חיבור DB</span>
+                  {dbConnected ? "✅ מחובר ל-Supabase — נתונים חיים" : "⚠️ לא מחובר — נתונים סטטיים"}
                 </div>
               </div>
             </div>
@@ -430,8 +514,8 @@ export default function LithiumDashboard() {
         {tab === "map" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ padding: 16, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>🗺️ מפת אירועים מתועדים</div>
-              <IsraelMap incidents={INCIDENTS} />
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>🗺️ מפת חום — אירועים לפי עיר</div>
+              <IsraelMap incidents={rawIncidents} />
             </div>
 
             {selInc && (
@@ -449,14 +533,13 @@ export default function LithiumDashboard() {
                   <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 8, background: `${selInc.sevC}15`, color: selInc.sevC, fontWeight: 700 }}>{selInc.sev}</span>
                   {selInc.d > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 8, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontWeight: 700 }}>💀 {selInc.d} הרוגים</span>}
                   {selInc.i > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 8, background: "rgba(249,115,22,0.1)", color: "#fdba74", fontWeight: 700 }}>🤕 {selInc.i} פצועים</span>}
-                  <span style={{ fontSize: 10, color: "#78716c" }}>מקור: {selInc.src}</span>
                 </div>
               </div>
             )}
 
             {/* Districts */}
             <div style={{ padding: 16, borderRadius: 18, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📍 התפלגות לפי מחוז</div>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📍 התפלגות לפי מחוז (מחושב מ-DB)</div>
               {DISTRICTS.map(d => (
                 <div key={d.n} style={{ marginBottom: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
@@ -475,12 +558,11 @@ export default function LithiumDashboard() {
         {/* ===== STATS ===== */}
         {tab === "stats" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Seasonality with year selector */}
             <div style={{ padding: 18, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>📅 עונתיות {seasonYear}</div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {[2022, 2023, 2024, 2025, 2026].map(yr => (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {years.map(yr => (
                     <button key={yr} onClick={() => setSeasonYear(yr)} style={{
                       padding: "4px 10px", borderRadius: 10, border: "none", cursor: "pointer",
                       background: seasonYear === yr ? "rgba(249,115,22,0.2)" : "rgba(255,255,255,0.04)",
@@ -491,18 +573,17 @@ export default function LithiumDashboard() {
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={170}>
-                <BarChart data={MONTHLY[seasonYear] || MONTHLY[2024]} barSize={16}>
+                <BarChart data={MONTHLY[seasonYear] || []} barSize={16}>
                   <XAxis dataKey="m" tick={{ fill: "#78716c", fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis hide />
                   <Tooltip {...tip} />
                   <Bar dataKey="v" radius={[6, 6, 0, 0]} name="שריפות">
-                    {(MONTHLY[seasonYear] || MONTHLY[2024]).map((d, i) => <Cell key={i} fill={d.v >= 40 ? "#ef4444" : d.v >= 30 ? "#f97316" : d.v > 0 ? "#fbbf24" : "#333"} opacity={d.v > 0 ? 0.85 : 0.2} />)}
+                    {(MONTHLY[seasonYear] || []).map((d, i) => <Cell key={i} fill={d.v >= 10 ? "#ef4444" : d.v >= 5 ? "#f97316" : d.v > 0 ? "#fbbf24" : "#333"} opacity={d.v > 0 ? 0.85 : 0.2} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
               <div style={{ fontSize: 11, color: "#a8a29e", marginTop: 8, padding: 10, borderRadius: 10, background: "rgba(249,115,22,0.05)" }}>
-                💡 שיא בקיץ — חום סביבתי מגביר thermal runaway בסוללות (מקור: NFPA, UL Research)
-                {seasonYear === 2026 && <span style={{ color: "#78716c" }}> • נתוני 2026 חלקיים (ינו-פבר)</span>}
+                💡 שיא בקיץ — חום סביבתי מגביר thermal runaway בסוללות
               </div>
             </div>
 
@@ -542,9 +623,9 @@ export default function LithiumDashboard() {
         {/* ===== LIST ===== */}
         {tab === "list" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, padding: "0 4px 4px" }}>🔥 אירועים מתועדים</div>
-            <div style={{ fontSize: 11, color: "#78716c", padding: "0 4px 6px" }}>נתונים ממקורות חדשותיים מאומתים בלבד</div>
-            {INCIDENTS.map(inc => (
+            <div style={{ fontSize: 15, fontWeight: 700, padding: "0 4px 4px" }}>🔥 אירועים מתועדים ({INCIDENTS_LIST.length})</div>
+            <div style={{ fontSize: 11, color: "#78716c", padding: "0 4px 6px" }}>נתונים מ-Supabase • ממוינים מהחדש לישן</div>
+            {INCIDENTS_LIST.map(inc => (
               <div key={inc.id}
                 onClick={() => setSelInc(selInc?.id === inc.id ? null : inc)}
                 style={{
@@ -571,6 +652,7 @@ export default function LithiumDashboard() {
                 {selInc?.id === inc.id && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.04)", fontSize: 12, color: "#a8a29e", lineHeight: 1.7 }}>
                     {inc.desc}
+                    {inc.verified && <span style={{ marginRight: 8, fontSize: 10, color: "#22c55e" }}>✅ מאומת</span>}
                   </div>
                 )}
               </div>
@@ -581,19 +663,20 @@ export default function LithiumDashboard() {
         {/* ===== SYSTEM ===== */}
         {tab === "system" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: 18, borderRadius: 20, background: "linear-gradient(135deg, rgba(59,130,246,0.06), rgba(139,92,246,0.04))", border: "1px solid rgba(59,130,246,0.1)" }}>
+            {/* DB Status */}
+            <div style={{ padding: 18, borderRadius: 20, background: "linear-gradient(135deg, rgba(34,197,94,0.06), rgba(59,130,246,0.04))", border: `1px solid ${dbConnected ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 11, background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🤖</div>
+                <div style={{ width: 38, height: 38, borderRadius: 11, background: dbConnected ? "linear-gradient(135deg, #22c55e, #3b82f6)" : "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🗄️</div>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 800 }}>מנוע AI אוטונומי</div>
-                  <div style={{ fontSize: 11, color: "#78716c" }}>Claude Sonnet + Web Search • כל שעה</div>
+                  <div style={{ fontSize: 15, fontWeight: 800 }}>Supabase Database</div>
+                  <div style={{ fontSize: 11, color: "#78716c" }}>{dbConnected ? "מחובר ופעיל" : "לא מחובר"}</div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {[
-                  { v: "33", l: "שאילתות חיפוש", col: "#3b82f6" },
-                  { v: "14", l: "RSS פידים", col: "#f97316" },
-                  { v: "3", l: "שכבות dedup", col: "#8b5cf6" },
+                  { v: String(rawIncidents.length), l: "אירועים ב-DB", col: "#22c55e" },
+                  { v: String(years.length), l: "שנים", col: "#3b82f6" },
+                  { v: lastScan ? "✅" : "—", l: "סריקה אחרונה", col: "#f97316" },
                 ].map((s, i) => (
                   <div key={i} style={{ flex: 1, textAlign: "center", padding: 10, borderRadius: 12, background: "rgba(255,255,255,0.03)" }}>
                     <div style={{ fontSize: 18, fontWeight: 900, color: s.col }}>{s.v}</div>
@@ -607,8 +690,8 @@ export default function LithiumDashboard() {
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📰 מקורות מידע</div>
               {[
                 { icon: "🚒", name: "כבאות והצלה", det: "דוברות ארצית + מחוזות, אתר 102, פייסבוק, טלגרם", col: "#ef4444" },
-                { icon: "📰", name: "חדשות ארציות", det: "ynet, כלכליסט, הארץ, וואלה, מעריב, גלובס, מאקו, חדשות 13/12, זמן ישראל, Ice", col: "#f97316" },
-                { icon: "📍", name: "חדשות מקומיות", det: "חי פה, NWS, רשת ניוזים, חדשות חיפה והקריות, מיבזק לייב, כיכר השבת, JDN, כל רגע, חדשות הנגב", col: "#fbbf24" },
+                { icon: "📰", name: "חדשות ארציות", det: "ynet, כלכליסט, הארץ, וואלה, מעריב, גלובס, מאקו, חדשות 13/12", col: "#f97316" },
+                { icon: "📍", name: "חדשות מקומיות", det: "חי פה, NWS, ניוזים, כיכר השבת, JDN, כל רגע, חדשות הנגב", col: "#fbbf24" },
                 { icon: "🏛️", name: "ממשלתי", det: "משרד התחבורה, המשרד להגנת הסביבה, רשות הכבאות", col: "#34d399" },
                 { icon: "🚑", name: "שירותי חירום", det: "מד\"א, איחוד הצלה — טלגרם + אתרים", col: "#60a5fa" },
                 { icon: "🌐", name: "בינלאומי", det: "Times of Israel, EV FireSafe, Reuters", col: "#a78bfa" },
@@ -623,23 +706,6 @@ export default function LithiumDashboard() {
               ))}
             </div>
 
-            <div style={{ padding: 16, borderRadius: 18, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>🛡️ מניעת כפילויות — 3 שכבות</div>
-              {[
-                { n: "1", t: "Hash מדויק", d: "תאריך + עיר מנורמלת + סוג = MD5", col: "#f97316" },
-                { n: "2", t: "קרבה בזמן", d: "אותה עיר+מכשיר בטווח ±3 ימים", col: "#fbbf24" },
-                { n: "3", t: "AI סמנטי", d: 'Claude בודק: "שריפה בפ״ת" = "דליקה בפתח תקווה"', col: "#60a5fa" },
-              ].map(s => (
-                <div key={s.n} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "center" }}>
-                  <div style={{ width: 28, height: 28, borderRadius: 8, background: `${s.col}12`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 13, color: s.col }}>{s.n}</div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700 }}>{s.t}</div>
-                    <div style={{ fontSize: 10, color: "#78716c" }}>{s.d}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
             {/* Credits */}
             <div style={{ padding: 14, borderRadius: 14, background: "linear-gradient(135deg, rgba(249,115,22,0.06), rgba(251,191,36,0.04))", border: "1px solid rgba(249,115,22,0.1)" }}>
               <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>👨‍💻 אודות</div>
@@ -647,28 +713,25 @@ export default function LithiumDashboard() {
                 פותח על ידי <strong style={{ color: "#f97316" }}>רועי צוקרמן</strong> ככלי ניסיוני
               </div>
               <div style={{ fontSize: 10, color: "#78716c", marginTop: 4 }}>
-                Next.js + Supabase + Claude AI • גרסה 1.0
+                Next.js + Supabase + Gemini AI • גרסה 2.0
               </div>
             </div>
 
-            {/* Legal Disclaimer */}
+            {/* Legal */}
             <div style={{ padding: 14, borderRadius: 14, background: "rgba(239,68,68,0.03)", border: "1px solid rgba(239,68,68,0.08)" }}>
               <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8, color: "#fca5a5" }}>⚠️ אזהרות שימוש</div>
               <div style={{ fontSize: 10.5, color: "#a8a29e", lineHeight: 1.8 }}>
                 <div style={{ marginBottom: 6 }}>
-                  <strong style={{ color: "#d6d3d1" }}>1. כלי ניסיוני בלבד</strong> — מערכת זו פותחה כפרויקט ניסיוני ואינה מהווה מערכת רשמית של שירותי כבאות והצלה או כל גוף ממשלתי אחר.
+                  <strong style={{ color: "#d6d3d1" }}>1. כלי ניסיוני בלבד</strong> — מערכת זו פותחה כפרויקט ניסיוני ואינה מהווה מערכת רשמית.
                 </div>
                 <div style={{ marginBottom: 6 }}>
-                  <strong style={{ color: "#d6d3d1" }}>2. אין לסמוך על הנתונים</strong> — המידע המוצג נאסף ממקורות ציבוריים באופן אוטומטי ועלול להכיל אי-דיוקים, השמטות, או שגיאות. אין להסתמך עליו לצורך קבלת החלטות מבצעיות, בטיחותיות, או משפטיות.
+                  <strong style={{ color: "#d6d3d1" }}>2. אין לסמוך על הנתונים</strong> — המידע נאסף ממקורות ציבוריים ועלול להכיל אי-דיוקים.
                 </div>
                 <div style={{ marginBottom: 6 }}>
-                  <strong style={{ color: "#d6d3d1" }}>3. אין אחריות</strong> — המפתח אינו נושא באחריות כלשהי לנזק ישיר או עקיף שעלול להיגרם כתוצאה משימוש במידע המוצג במערכת זו.
-                </div>
-                <div style={{ marginBottom: 6 }}>
-                  <strong style={{ color: "#d6d3d1" }}>4. נתונים סטטיסטיים</strong> — הנתונים המצטברים (מגמות שנתיות, עונתיות, פילוח) מבוססים על הערכות ואינם נתונים רשמיים מאושרים של נציבות כבאות והצלה.
+                  <strong style={{ color: "#d6d3d1" }}>3. אין אחריות</strong> — המפתח אינו נושא באחריות לנזק שעלול להיגרם משימוש במידע.
                 </div>
                 <div>
-                  <strong style={{ color: "#d6d3d1" }}>5. מקורות מידע</strong> — למידע רשמי ומדויק יש לפנות לנציבות כבאות והצלה לישראל בלבד.
+                  <strong style={{ color: "#d6d3d1" }}>4. מקורות רשמיים</strong> — למידע מדויק יש לפנות לנציבות כבאות והצלה לישראל.
                 </div>
               </div>
             </div>
@@ -676,7 +739,7 @@ export default function LithiumDashboard() {
         )}
       </div>
 
-      {/* Tab Bar - floating pill */}
+      {/* Tab Bar */}
       <div style={{
         position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)",
         background: "rgba(28,25,23,0.92)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
@@ -701,7 +764,7 @@ export default function LithiumDashboard() {
       {/* Footer */}
       <div style={{ textAlign: "center", padding: "0 20px 100px", fontSize: 9, color: "#44403c", lineHeight: 1.6, position: "relative", zIndex: 10 }}>
         פותח ע"י <strong style={{ color: "#78716c" }}>רועי צוקרמן</strong> • כלי ניסיוני<br />
-        נתונים מבוססים על כבאות והצלה, כלכליסט, ynet, מעריב, מאקו, חי פה, NWS, ניוזים, JDN ועוד • {now.toLocaleDateString("he-IL")}
+        {dbConnected ? `מחובר ל-Supabase • ${rawIncidents.length} אירועים` : "נתונים סטטיים"} • {now.toLocaleDateString("he-IL")}
       </div>
     </div>
   );
