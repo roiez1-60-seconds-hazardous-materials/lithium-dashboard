@@ -17,25 +17,25 @@ async function askGemini(prompt: string): Promise<string> {
       }),
     }
   );
-  if (!res.ok) return `ERROR_STATUS_${res.status}`;
+  if (!res.ok) return "ERROR_STATUS_" + res.status;
   const data = await res.json();
   return data.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("") || "EMPTY";
 }
 
 async function checkDuplicate(inc: any): Promise<boolean> {
   try {
-    const url = `${SUPABASE_URL}/rest/v1/incidents?incident_date=eq.${inc.incident_date}&city=eq.${encodeURIComponent(inc.city)}&device_type=eq.${encodeURIComponent(inc.device_type)}&select=id`;
+    const url = SUPABASE_URL + "/rest/v1/incidents?incident_date=eq." + inc.incident_date + "&city=eq." + encodeURIComponent(inc.city) + "&device_type=eq." + encodeURIComponent(inc.device_type) + "&select=id";
     const res = await fetch(url, {
-      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: "Bearer " + SUPABASE_SERVICE_KEY },
     });
     const existing = await res.json();
     if (Array.isArray(existing) && existing.length > 0) return true;
     const date = new Date(inc.incident_date);
     const before = new Date(date); before.setDate(before.getDate() - 3);
     const after = new Date(date); after.setDate(after.getDate() + 3);
-    const fuzzyUrl = `${SUPABASE_URL}/rest/v1/incidents?incident_date=gte.${before.toISOString().split("T")[0]}&incident_date=lte.${after.toISOString().split("T")[0]}&city=eq.${encodeURIComponent(inc.city)}&device_type=eq.${encodeURIComponent(inc.device_type)}&select=id`;
+    const fuzzyUrl = SUPABASE_URL + "/rest/v1/incidents?incident_date=gte." + before.toISOString().split("T")[0] + "&incident_date=lte." + after.toISOString().split("T")[0] + "&city=eq." + encodeURIComponent(inc.city) + "&device_type=eq." + encodeURIComponent(inc.device_type) + "&select=id";
     const fuzzyRes = await fetch(fuzzyUrl, {
-      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` },
+      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: "Bearer " + SUPABASE_SERVICE_KEY },
     });
     const fuzzyExisting = await fuzzyRes.json();
     return Array.isArray(fuzzyExisting) && fuzzyExisting.length > 0;
@@ -60,19 +60,12 @@ export async function GET(request: Request) {
   const debugInfo: any[] = [];
 
   for (const half of halves) {
-    const prompt = `רשום אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודשים ${half.months} ${year}.
-
-כלול: שריפות אופניים חשמליים, קורקינטים, רכבים חשמליים, קלנועיות, טלפונים, פאוורבנקים, UPS.
-לא לכלול: תאונות דרכים רגילות, גניבות, חקיקה.
-רק אירועים אמיתיים שדווחו בתקשורת!
-
-החזר JSON array בלבד (בלי markdown, בלי backticks):
-[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"דן/מרכז/חוף/ירושלים/דרום/צפון","device_type":"אופניים חשמליים","severity":"חמור","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"ynet","source_url":""}]`;
+    const prompt = "רשום אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודשים " + half.months + " " + year + ".\n\nכלול: שריפות אופניים חשמליים, קורקינטים, רכבים חשמליים, קלנועיות, טלפונים, פאוורבנקים, UPS.\nלא לכלול: תאונות דרכים רגילות, גניבות, חקיקה.\nרק אירועים אמיתיים שדווחו בתקשורת!\n\nהחזר JSON array בלבד (בלי markdown, בלי backticks):\n[{\"incident_date\":\"YYYY-MM-DD\",\"city\":\"עיר\",\"district\":\"דן/מרכז/חוף/ירושלים/דרום/צפון\",\"device_type\":\"אופניים חשמליים\",\"severity\":\"חמור\",\"injuries\":0,\"fatalities\":0,\"property_damage\":true,\"description\":\"תיאור קצר\",\"source_name\":\"ynet\",\"source_url\":\"\"}]";
 
     const raw = await askGemini(prompt);
 
     if (debug) {
-      debugInfo.push({ year, half: half.label, raw_response: raw.substring(0, 1500) });
+      debugInfo.push({ year: year, half: half.label, raw_response: raw.substring(0, 1500) });
     }
 
     try {
@@ -104,11 +97,11 @@ export async function GET(request: Request) {
           verified: false,
         };
 
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/incidents`, {
+        const res = await fetch(SUPABASE_URL + "/rest/v1/incidents", {
           method: "POST",
           headers: {
             apikey: SUPABASE_SERVICE_KEY,
-            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+            Authorization: "Bearer " + SUPABASE_SERVICE_KEY,
             "Content-Type": "application/json",
             Prefer: "return=minimal",
           },
@@ -117,26 +110,26 @@ export async function GET(request: Request) {
         if (res.ok) totalInserted++;
       }
 
-      allResults.push({ year, half: half.label, found: incidents.length });
+      allResults.push({ year: year, half: half.label, found: incidents.length });
     } catch (e: any) {
-      allResults.push({ year, half: half.label, error: e.message });
+      allResults.push({ year: year, half: half.label, error: e.message });
     }
 
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(function(r) { setTimeout(r, 1000); });
   }
 
-  return Response.json({
+  const result: any = {
     status: "ok",
-    year,
+    year: year,
     total_inserted: totalInserted,
     total_duplicates: totalDuplicates,
     details: allResults,
     duration_ms: Date.now() - startTime,
-    ...(debug ? { debug: debugInfo } : {}),
-  });
-}
-```
+  };
 
-**Commit** → חכה דקה → נסה:
-```
-https://lithium-fire-dashboard.vercel.app/api/scan-archive?year=2024&debug=1
+  if (debug) {
+    result.debug = debugInfo;
+  }
+
+  return Response.json(result);
+}
