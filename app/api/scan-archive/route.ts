@@ -69,16 +69,34 @@ async function searchWithGemini(year: number, half: string): Promise<any[]> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-          tools: [{ googleSearch: {} }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+          tools: [{ google_search_retrieval: { dynamic_retrieval_config: { mode: "MODE_DYNAMIC" } } }],
         }),
       }
     );
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error(`Gemini error for ${year} ${half}:`, errText);
-      return [];
+      // If grounding fails, retry without search tool (use model knowledge)
+      const fallbackRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+          }),
+        }
+      );
+      if (!fallbackRes.ok) return [];
+      const fallbackData = await fallbackRes.json();
+      const fallbackText = fallbackData.candidates?.[0]?.content?.parts
+        ?.map((p: any) => p.text || "").join("") || "[]";
+      const fallbackMatch = fallbackText.match(/\[[\s\S]*\]/);
+      if (!fallbackMatch) return [];
+      const fallbackParsed = JSON.parse(fallbackMatch[0]);
+      return Array.isArray(fallbackParsed) ? fallbackParsed : [];
     }
 
     const data = await res.json();
