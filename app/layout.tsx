@@ -1,15 +1,16 @@
-export const metadata = {
-  title: 'משל"ט - סידור עבודה | כבאות והצלה',
-  description: 'מערכת סידור עבודה למרכזי שליטה בכבאות והצלה לישראל',
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "מעקב שריפות סוללות ליתיום יון — כבאות והצלה",
+  description: "דשבורד מעקב שריפות סוללות ליתיום יון בישראל",
 };
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="he" dir="rtl">
-      <head>
-        <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-      </head>
-      <body style={{ margin: 0, padding: 0 }}>{children}</body>
+      <body style={{ margin: 0, padding: 0, background: "#0c0a09" }}>
+        {children}
+      </body>
     </html>
   );
 }
