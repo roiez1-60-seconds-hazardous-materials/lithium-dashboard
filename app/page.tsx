@@ -363,6 +363,11 @@ export default function LithiumDashboard() {
   const [dbConnected, setDbConnected] = useState(false);
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [showBreakdown2019, setShowBreakdown2019] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   // Fetch from Supabase
   useEffect(() => {
@@ -400,9 +405,60 @@ export default function LithiumDashboard() {
 
     fetchData();
     fetchLastScan();
+    fetchNotifications();
     const t = setInterval(() => setNow(new Date()), 60000);
-    return () => clearInterval(t);
+    // Poll notifications every 2 minutes
+    const nPoll = setInterval(fetchNotifications, 120000);
+    return () => { clearInterval(t); clearInterval(nPoll); };
   }, []);
+
+  // Fetch notifications from API
+  async function fetchNotifications() {
+    try {
+      const res = await fetch("/api/push/notifications");
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setNotifications(data);
+      }
+    } catch {}
+  }
+
+  // Subscribe to push notifications
+  async function subscribePush() {
+    setPushLoading(true);
+    try {
+      if (!("Notification" in window)) {
+        alert("הדפדפן לא תומך בהתראות");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        alert("ההתראות לא אושרו. אנא אפשר התראות בהגדרות הדפדפן.");
+        return;
+      }
+      // Register with our API
+      const res = await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          endpoint: `browser_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          keys: {},
+        }),
+      });
+      if (res.ok) {
+        setPushEnabled(true);
+        // Show a test notification
+        new Notification("🔥 התראות הופעלו", {
+          body: "תקבל התראה בכל פעם שמזוהה שריפת סוללת ליתיום חדשה",
+          icon: "🔥",
+        });
+      }
+    } catch (e) {
+      console.error("Push subscribe error:", e);
+    } finally {
+      setPushLoading(false);
+    }
+  }
 
   // Process DB data
   const { DEVICE_PIE, MONTHLY, DISTRICTS, INCIDENTS_LIST, years } = useMemo(
@@ -508,9 +564,25 @@ export default function LithiumDashboard() {
               <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>מעקב שריפות סוללות ליתיום יון</div>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 16, background: dbConnected ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: dbConnected ? "#22c55e" : "#ef4444", boxShadow: `0 0 10px ${dbConnected ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)"}` }} />
-            <span style={{ fontSize: 11, color: dbConnected ? "#22c55e" : "#ef4444", fontWeight: 600 }}>{dbConnected ? "LIVE DB" : "OFFLINE"}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Bell icon */}
+            <div style={{ position: "relative", cursor: "pointer" }} onClick={() => setShowNotifPanel(!showNotifPanel)}>
+              <span style={{ fontSize: 20 }}>🔔</span>
+              {unreadCount > 0 && (
+                <div style={{
+                  position: "absolute", top: -4, right: -6,
+                  width: 16, height: 16, borderRadius: "50%",
+                  background: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 9, fontWeight: 800, color: "#fff",
+                  boxShadow: "0 0 8px rgba(239,68,68,0.6)",
+                }}>{unreadCount}</div>
+              )}
+            </div>
+            {/* LIVE DB badge */}
+            <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 16, background: dbConnected ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", background: dbConnected ? "#22c55e" : "#ef4444", boxShadow: `0 0 10px ${dbConnected ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)"}` }} />
+              <span style={{ fontSize: 11, color: dbConnected ? "#22c55e" : "#ef4444", fontWeight: 600 }}>{dbConnected ? "LIVE DB" : "OFFLINE"}</span>
+            </div>
           </div>
         </div>
         <div style={{ fontSize: 11, color: "#57534e", marginTop: 6 }}>
@@ -518,6 +590,65 @@ export default function LithiumDashboard() {
           {lastScan && <span> • סריקה אחרונה: {lastScan}</span>}
         </div>
       </div>
+
+      {/* Notification Panel (dropdown) */}
+      {showNotifPanel && (
+        <div style={{
+          position: "absolute", top: 100, left: 14, right: 14,
+          zIndex: 100, borderRadius: 16,
+          background: "rgba(28,25,23,0.97)", border: "1px solid rgba(255,255,255,0.08)",
+          backdropFilter: "blur(20px)", boxShadow: "0 20px 60px rgba(0,0,0,0.6)",
+          maxHeight: 400, overflow: "auto",
+        }}>
+          <div style={{ padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>🔔 התראות</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {!pushEnabled && (
+                <button onClick={subscribePush} disabled={pushLoading}
+                  style={{
+                    padding: "5px 12px", borderRadius: 10, border: "none", cursor: "pointer",
+                    background: "linear-gradient(135deg, #f97316, #ef4444)", color: "#fff",
+                    fontSize: 10, fontWeight: 700, opacity: pushLoading ? 0.5 : 1,
+                  }}>
+                  {pushLoading ? "..." : "הפעל התראות"}
+                </button>
+              )}
+              {pushEnabled && (
+                <span style={{ fontSize: 10, color: "#22c55e", fontWeight: 600 }}>✅ התראות פעילות</span>
+              )}
+              <span onClick={() => setShowNotifPanel(false)} style={{ cursor: "pointer", fontSize: 16, color: "#78716c" }}>✕</span>
+            </div>
+          </div>
+
+          {notifications.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center" }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>🔕</div>
+              <div style={{ fontSize: 12, color: "#78716c" }}>אין התראות עדיין</div>
+              <div style={{ fontSize: 10, color: "#57534e", marginTop: 4 }}>כשתזוהה שריפת ליתיום חדשה, תקבל התראה כאן</div>
+            </div>
+          ) : (
+            <div>
+              {notifications.slice(0, 15).map((n: any, i: number) => (
+                <div key={n.id || i} style={{
+                  padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.03)",
+                  background: !n.read ? "rgba(249,115,22,0.04)" : "transparent",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, flex: 1 }}>{n.title}</div>
+                    <div style={{
+                      fontSize: 8, padding: "2px 6px", borderRadius: 6, fontWeight: 700, marginRight: 4,
+                      background: n.severity === "קריטי" ? "rgba(239,68,68,0.15)" : n.severity === "חמור" ? "rgba(249,115,22,0.15)" : "rgba(234,179,8,0.15)",
+                      color: n.severity === "קריטי" ? "#ef4444" : n.severity === "חמור" ? "#f97316" : "#eab308",
+                    }}>{n.severity}</div>
+                  </div>
+                  <div style={{ fontSize: 10, color: "#a8a29e", marginTop: 3, lineHeight: 1.4 }}>{n.body}</div>
+                  <div style={{ fontSize: 9, color: "#57534e", marginTop: 4 }}>{new Date(n.sent_at).toLocaleString("he-IL")}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Content */}
       <div style={{ padding: "0 14px 100px", position: "relative", zIndex: 10 }}>
