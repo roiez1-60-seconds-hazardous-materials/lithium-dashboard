@@ -1,19 +1,32 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
-import { BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, ComposedChart, Legend } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 
-// ==============================================
-// SUPABASE CONNECTION
-// ==============================================
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder"
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// ==============================================
-// STATIC DATA (causes, districts — these don't come from DB)
-// ==============================================
+const ANNUAL_STATS = [
+  { year: 2017, fires: 76,  fatalities: 0, source: "כלכליסט" },
+  { year: 2018, fires: 90,  fatalities: 0, source: "כלכליסט" },
+  { year: 2019, fires: 140, fatalities: 0, source: "כלכליסט" },
+  { year: 2020, fires: 184, fatalities: 0, source: "כלכליסט" },
+  { year: 2021, fires: 167, fatalities: 5, source: "כלכליסט" },
+  { year: 2022, fires: 224, fatalities: 6, source: "מעריב" },
+  { year: 2023, fires: 232, fatalities: 0, source: "מעריב" },
+  { year: 2024, fires: 250, fatalities: 4, source: "ישראל היום" },
+];
+
+const DEVICE_BREAKDOWN_2019 = [
+  { name: "אופניים חשמליים", count: 96, pct: 68.6, color: "#f59e0b" },
+  { name: "קורקינטים חשמליים", count: 16, pct: 11.4, color: "#f97316" },
+  { name: "טלפונים ניידים", count: 11, pct: 7.9, color: "#60a5fa" },
+  { name: "רכב היברידי", count: 2, pct: 1.4, color: "#ef4444" },
+  { name: "אחר", count: 15, pct: 10.7, color: "#94a3b8" },
+];
+
 const CAUSES = [
   { name: "טעינת יתר", pct: 34, col: "#ef4444" },
   { name: "סוללה לא מקורית", pct: 22, col: "#f97316" },
@@ -23,7 +36,6 @@ const CAUSES = [
   { name: "אחר / לא ידוע", pct: 6, col: "#94a3b8" },
 ];
 
-// Device type → color + icon mapping
 const DEVICE_META: Record<string, { icon: string; color: string }> = {
   "אופניים חשמליים": { icon: "🚲", color: "#f59e0b" },
   "קורקינט חשמלי": { icon: "🛴", color: "#f97316" },
@@ -33,6 +45,7 @@ const DEVICE_META: Record<string, { icon: string; color: string }> = {
   "UPS/גיבוי": { icon: "🔋", color: "#34d399" },
   "סוללת כוח": { icon: "🔋", color: "#2dd4bf" },
   "כלי עבודה": { icon: "🔧", color: "#a78bfa" },
+  "טרקטורון חשמלי": { icon: "🚜", color: "#dc2626" },
   "אחר": { icon: "⚡", color: "#94a3b8" },
 };
 
@@ -42,35 +55,7 @@ const SEVERITY_COLOR: Record<string, string> = {
   "חמור": "#f97316",
   "קריטי": "#ef4444",
 };
-
-// District name mapping for DB
-const DISTRICT_ORDER = ["דן", "מרכז", "חוף", "ירושלים", "דרום", "צפון", "יו\"ש"];
-
-// ==============================================
-// HELPER: Process raw incidents into dashboard data
-// ==============================================
 function processIncidents(incidents: any[]) {
-  // Yearly aggregation
-  const yearMap: Record<number, { fires: number; deaths: number; injuries: number }> = {};
-  incidents.forEach(inc => {
-    const yr = new Date(inc.incident_date).getFullYear();
-    if (!yearMap[yr]) yearMap[yr] = { fires: 0, deaths: 0, injuries: 0 };
-    yearMap[yr].fires++;
-    yearMap[yr].deaths += inc.fatalities || 0;
-    yearMap[yr].injuries += inc.injuries || 0;
-  });
-
-  const currentYear = new Date().getFullYear();
-  const years = Object.keys(yearMap).map(Number).sort();
-  const YEARLY = years.map(yr => ({
-    y: yr === currentYear ? `'${String(yr).slice(2)}*` : `'${String(yr).slice(2)}`,
-    year: yr,
-    fires: yearMap[yr].fires,
-    deaths: yearMap[yr].deaths,
-    injuries: yearMap[yr].injuries,
-  }));
-
-  // Device pie
   const deviceMap: Record<string, number> = {};
   incidents.forEach(inc => {
     const dt = inc.device_type || "אחר";
@@ -84,9 +69,12 @@ function processIncidents(incidents: any[]) {
       c: DEVICE_META[name]?.color || "#94a3b8",
     }));
 
-  // Monthly by year
-  const MONTHLY: Record<number, { m: string; v: number }[]> = {};
+  const yearSet = new Set<number>();
+  incidents.forEach(inc => yearSet.add(new Date(inc.incident_date).getFullYear()));
+  const years = Array.from(yearSet).sort();
+
   const monthNames = ["ינו", "פבר", "מרץ", "אפר", "מאי", "יונ", "יול", "אוג", "ספט", "אוק", "נוב", "דצמ"];
+  const MONTHLY: Record<number, { m: string; v: number }[]> = {};
   years.forEach(yr => {
     const monthCounts = new Array(12).fill(0);
     incidents.forEach(inc => {
@@ -96,7 +84,6 @@ function processIncidents(incidents: any[]) {
     MONTHLY[yr] = monthNames.map((m, i) => ({ m, v: monthCounts[i] }));
   });
 
-  // District distribution
   const districtMap: Record<string, number> = {};
   incidents.forEach(inc => {
     const d = inc.district || "אחר";
@@ -107,11 +94,10 @@ function processIncidents(incidents: any[]) {
     .sort((a, b) => b[1] - a[1])
     .map(([n, count]) => ({ n, pct: Math.round(count / total * 100) }));
 
-  // Recent notable incidents for list view
   const INCIDENTS_LIST = incidents
     .sort((a, b) => new Date(b.incident_date).getTime() - new Date(a.incident_date).getTime())
     .slice(0, 50)
-    .map((inc, i) => ({
+    .map((inc) => ({
       id: inc.id,
       date: new Date(inc.incident_date).toLocaleDateString("he-IL"),
       city: inc.city,
@@ -127,18 +113,21 @@ function processIncidents(incidents: any[]) {
       verified: inc.verified,
     }));
 
-  return { YEARLY, DEVICE_PIE, MONTHLY, DISTRICTS, INCIDENTS_LIST, years };
+  return { DEVICE_PIE, MONTHLY, DISTRICTS, INCIDENTS_LIST, years };
 }
-
-// ==============================================
-// ISRAEL MAP
-// ==============================================
 function IsraelMap({ incidents }: { incidents: any[] }) {
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const [hoveredCity, setHoveredCity] = useState<string | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+
   const israelCoords = [
     [35.10, 33.08], [35.13, 33.09], [35.46, 33.09],
     [35.55, 33.26], [35.82, 33.28], [35.84, 32.87],
-    [35.72, 32.71],
-    [35.55, 32.39],
+    [35.72, 32.71], [35.55, 32.39],
     [35.57, 32.10], [35.55, 31.87], [35.53, 31.75],
     [35.50, 31.49], [35.42, 31.10],
     [34.92, 29.50],
@@ -147,24 +136,23 @@ function IsraelMap({ incidents }: { incidents: any[] }) {
     [35.10, 33.08],
   ];
 
-  const W = 155, H = 440;
+  const W = 200, H = 520;
   const center = [35.05, 31.4];
-  const scale = 3600;
+  const scale = 4200;
 
-  const project = (lng: number, lat: number) => {
-    const x = W/2 + (lng - center[0]) * scale / 100;
+  const project = useCallback((lng: number, lat: number) => {
+    const x = W / 2 + (lng - center[0]) * scale / 100;
     const latRad = lat * Math.PI / 180;
     const centerRad = center[1] * Math.PI / 180;
-    const y = H/2 - (Math.log(Math.tan(Math.PI/4 + latRad/2)) - Math.log(Math.tan(Math.PI/4 + centerRad/2))) * scale / 100 * (180/Math.PI);
+    const y = H / 2 - (Math.log(Math.tan(Math.PI / 4 + latRad / 2)) - Math.log(Math.tan(Math.PI / 4 + centerRad / 2))) * scale / 100 * (180 / Math.PI);
     return [x, y];
-  };
+  }, []);
 
   const pathD = israelCoords.map((c, i) => {
     const [x, y] = project(c[0], c[1]);
     return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ") + "Z";
 
-  // Build heat from actual incident city counts
   const cityHeat: Record<string, number> = {};
   incidents.forEach(inc => {
     cityHeat[inc.city] = (cityHeat[inc.city] || 0) + 1;
@@ -184,86 +172,129 @@ function IsraelMap({ incidents }: { incidents: any[] }) {
   };
 
   const maxHeat = Math.max(...Object.values(cityHeat), 1);
-
   const cityData = Object.entries(cityHeat).map(([name, heat]) => ({
-    name,
-    coords: cityCoords[name],
-    heat,
+    name, coords: cityCoords[name], heat,
   })).filter(c => c.coords);
 
+  const handlePointerDown = (e: React.PointerEvent) => {
+    setDragging(true);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setPanStart({ ...pan });
+  };
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!dragging) return;
+    const dx = (e.clientX - dragStart.x) / zoom;
+    const dy = (e.clientY - dragStart.y) / zoom;
+    setPan({ x: panStart.x + dx, y: panStart.y + dy });
+  };
+  const handlePointerUp = () => setDragging(false);
+  const handleZoomIn = () => setZoom(z => Math.min(z * 1.5, 6));
+  const handleZoomOut = () => {
+    setZoom(z => {
+      const newZ = Math.max(z / 1.5, 1);
+      if (newZ === 1) setPan({ x: 0, y: 0 });
+      return newZ;
+    });
+  };
+  const handleReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
   return (
-    <svg viewBox={`-5 -5 ${W+10} ${H+10}`} style={{ width: "100%", maxHeight: 460 }}>
-      <defs>
-        <clipPath id="israelClip"><path d={pathD} /></clipPath>
-        {cityData.map(c => {
-          const intensity = c.heat / maxHeat;
-          let core, mid;
-          if (intensity > 0.7) { core = "#dc2626"; mid = "#ef4444"; }
-          else if (intensity > 0.5) { core = "#ea580c"; mid = "#f97316"; }
-          else if (intensity > 0.3) { core = "#d97706"; mid = "#f59e0b"; }
-          else if (intensity > 0.15) { core = "#ca8a04"; mid = "#eab308"; }
-          else { core = "#65a30d"; mid = "#84cc16"; }
-          return (
-            <radialGradient key={`g-${c.name}`} id={`hg-${c.name.replace(/[\s\/\"]/g,'')}`} cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor={core} stopOpacity={0.85} />
-              <stop offset="40%" stopColor={mid} stopOpacity={0.55} />
-              <stop offset="75%" stopColor={mid} stopOpacity={0.2} />
-              <stop offset="100%" stopColor={mid} stopOpacity="0" />
-            </radialGradient>
-          );
-        })}
-      </defs>
-
-      <path d={pathD} fill="#e8e5e0" stroke="rgba(120,113,108,0.5)" strokeWidth="0.8" strokeLinejoin="round" />
-
-      <g clipPath="url(#israelClip)">
-        {cityData.map(c => {
-          const [x, y] = project(c.coords![0], c.coords![1]);
-          const intensity = c.heat / maxHeat;
-          const r = 4 + intensity * 14;
-          return (
-            <circle key={`heat-${c.name}`} cx={x} cy={y} r={r}
-              fill={`url(#hg-${c.name.replace(/[\s\/\"]/g,'')})`}>
-              <animate attributeName="r" values={`${r};${r*1.06};${r}`} dur="5s" repeatCount="indefinite" />
-            </circle>
-          );
-        })}
-      </g>
-
-      {Object.entries(cityCoords).map(([name, coords]) => {
-        const [x, y] = project(coords[0], coords[1]);
-        const isMain = ["חיפה","תל אביב","ירושלים","באר שבע","אילת"].includes(name);
-        if (!isMain) return (
-          <circle key={`dot-${name}`} cx={x} cy={y} r="0.7" fill="rgba(28,25,23,0.35)" />
-        );
-        return (
-          <g key={`lbl-${name}`}>
-            <circle cx={x} cy={y} r="1" fill="rgba(28,25,23,0.45)" />
-            <text x={x} y={y - 3.5} textAnchor="middle"
-              fill="rgba(28,25,23,0.75)" fontSize="3.5" fontFamily="sans-serif" fontWeight="600"
-              stroke="#e8e5e0" strokeWidth="0.4" paintOrder="stroke">
-              {name}
-            </text>
+    <div style={{ position: "relative" }}>
+      <div style={{ position: "absolute", top: 8, left: 8, display: "flex", flexDirection: "column", gap: 4, zIndex: 20 }}>
+        <button onClick={handleZoomIn} style={{ width: 32, height: 32, borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(28,25,23,0.85)", color: "#fafaf9", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>+</button>
+        <button onClick={handleZoomOut} style={{ width: 32, height: 32, borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(28,25,23,0.85)", color: "#fafaf9", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>−</button>
+        <button onClick={handleReset} style={{ width: 32, height: 32, borderRadius: 10, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(28,25,23,0.85)", color: "#fafaf9", fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>⟲</button>
+      </div>
+      <div style={{ position: "absolute", top: 8, right: 8, fontSize: 10, color: "#78716c", background: "rgba(28,25,23,0.7)", padding: "3px 8px", borderRadius: 8, zIndex: 20 }}>×{zoom.toFixed(1)}</div>
+      {hoveredCity && (
+        <div style={{ position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", fontSize: 12, color: "#fafaf9", background: "rgba(28,25,23,0.9)", padding: "5px 12px", borderRadius: 10, zIndex: 20, fontWeight: 700, border: "1px solid rgba(249,115,22,0.2)" }}>
+          {hoveredCity}: {cityHeat[hoveredCity] || 0} אירועים
+        </div>
+      )}
+      <svg ref={svgRef} viewBox={`-10 -10 ${W + 20} ${H + 20}`}
+        style={{ width: "100%", maxHeight: 500, cursor: dragging ? "grabbing" : "grab", touchAction: "none" }}
+        onPointerDown={handlePointerDown} onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp}>
+        <g transform={`translate(${W / 2 + pan.x}, ${H / 2 + pan.y}) scale(${zoom}) translate(${-W / 2}, ${-H / 2})`}>
+          <defs>
+            <clipPath id="israelClip"><path d={pathD} /></clipPath>
+            {cityData.map(c => {
+              const intensity = c.heat / maxHeat;
+              let core, mid;
+              if (intensity > 0.7) { core = "#dc2626"; mid = "#ef4444"; }
+              else if (intensity > 0.5) { core = "#ea580c"; mid = "#f97316"; }
+              else if (intensity > 0.3) { core = "#d97706"; mid = "#f59e0b"; }
+              else if (intensity > 0.15) { core = "#ca8a04"; mid = "#eab308"; }
+              else { core = "#65a30d"; mid = "#84cc16"; }
+              return (
+                <radialGradient key={`g-${c.name}`} id={`hg-${c.name.replace(/[\s\/\"]/g, '')}`} cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor={core} stopOpacity={0.85} />
+                  <stop offset="40%" stopColor={mid} stopOpacity={0.55} />
+                  <stop offset="75%" stopColor={mid} stopOpacity={0.2} />
+                  <stop offset="100%" stopColor={mid} stopOpacity="0" />
+                </radialGradient>
+              );
+            })}
+          </defs>
+          <path d={pathD} fill="#e8e5e0" stroke="rgba(120,113,108,0.5)" strokeWidth={0.8 / zoom} strokeLinejoin="round" />
+          <g clipPath="url(#israelClip)">
+            {cityData.map(c => {
+              const [x, y] = project(c.coords![0], c.coords![1]);
+              const intensity = c.heat / maxHeat;
+              const r = 4 + intensity * 14;
+              return (
+                <circle key={`heat-${c.name}`} cx={x} cy={y} r={r}
+                  fill={`url(#hg-${c.name.replace(/[\s\/\"]/g, '')})`}
+                  onPointerEnter={() => setHoveredCity(c.name)}
+                  onPointerLeave={() => setHoveredCity(null)}
+                  style={{ cursor: "pointer" }}>
+                  <animate attributeName="r" values={`${r};${r * 1.06};${r}`} dur="5s" repeatCount="indefinite" />
+                </circle>
+              );
+            })}
           </g>
-        );
-      })}
-
-      <g transform={`translate(${W-42}, ${H-45})`}>
-        <text x="0" y="0" fill="rgba(168,162,158,0.6)" fontSize="4" fontFamily="sans-serif" fontWeight="600">עוצמת אירועים</text>
-        {[["מעט","#84cc16"],["בינוני","#f59e0b"],["רב","#ef4444"]].map(([lbl,col],i) => (
-          <g key={String(lbl)}>
-            <circle cx="5" cy={10+i*9} r="3.5" fill={String(col)} opacity="0.7" />
-            <text x="12" y={12+i*9} fill="rgba(168,162,158,0.5)" fontSize="3.5">{lbl}</text>
-          </g>
-        ))}
-      </g>
-    </svg>
+          {Object.entries(cityCoords).map(([name, coords]) => {
+            const [x, y] = project(coords[0], coords[1]);
+            const isMain = ["חיפה", "תל אביב", "ירושלים", "באר שבע", "אילת"].includes(name);
+            const isSecondary = ["נתניה", "חדרה", "אשדוד", "אשקלון", "נצרת", "עכו", "פתח תקווה", "רמת גן", "חולון", "ראשון לציון"].includes(name);
+            const showLabel = isMain || (zoom >= 1.5 && isSecondary) || (zoom >= 3);
+            const fontSize = isMain ? 3.5 / Math.max(zoom * 0.7, 1) : 2.8 / Math.max(zoom * 0.7, 1);
+            return (
+              <g key={`lbl-${name}`}>
+                <circle cx={x} cy={y} r={Math.max(0.5, 0.8 / zoom)} fill="rgba(28,25,23,0.45)"
+                  onPointerEnter={() => setHoveredCity(name)}
+                  onPointerLeave={() => setHoveredCity(null)}
+                  style={{ cursor: "pointer" }} />
+                {showLabel && (
+                  <text x={x} y={y - Math.max(2, 3.5 / zoom)} textAnchor="middle"
+                    fill={hoveredCity === name ? "#f97316" : "rgba(28,25,23,0.75)"}
+                    fontSize={fontSize} fontFamily="sans-serif" fontWeight="600"
+                    stroke="#e8e5e0" strokeWidth={0.3 / Math.max(zoom * 0.7, 1)} paintOrder="stroke">
+                    {name}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+          {zoom <= 1.5 && (
+            <g transform={`translate(${W - 42}, ${H - 45})`}>
+              <text x="0" y="0" fill="rgba(168,162,158,0.6)" fontSize="4" fontFamily="sans-serif" fontWeight="600">עוצמת אירועים</text>
+              {[["מעט", "#84cc16"], ["בינוני", "#f59e0b"], ["רב", "#ef4444"]].map(([lbl, col], i) => (
+                <g key={String(lbl)}>
+                  <circle cx="5" cy={10 + i * 9} r="3.5" fill={String(col)} opacity="0.7" />
+                  <text x="12" y={12 + i * 9} fill="rgba(168,162,158,0.5)" fontSize="3.5">{lbl}</text>
+                </g>
+              ))}
+            </g>
+          )}
+        </g>
+      </svg>
+      <div style={{ fontSize: 10, color: "#57534e", textAlign: "center", marginTop: 6 }}>
+        🔍 גרור + לחץ +/− לזום | רזולוציה גבוהה בזום
+      </div>
+    </div>
   );
 }
-
-// ==============================================
-// MAIN DASHBOARD
-// ==============================================
 export default function LithiumDashboard() {
   const [tab, setTab] = useState("home");
   const [selInc, setSelInc] = useState<any>(null);
@@ -274,54 +305,48 @@ export default function LithiumDashboard() {
   const [loading, setLoading] = useState(true);
   const [dbConnected, setDbConnected] = useState(false);
   const [lastScan, setLastScan] = useState<string | null>(null);
+  const [showBreakdown2019, setShowBreakdown2019] = useState(false);
 
-  // Fetch from Supabase
   useEffect(() => {
     async function fetchData() {
       try {
         const { data, error } = await supabase
-          .from("incidents")
-          .select("*")
-          .order("incident_date", { ascending: false });
-
+          .from("incidents").select("*").order("incident_date", { ascending: false });
         if (error) throw error;
-        if (data && data.length > 0) {
-          setRawIncidents(data);
-          setDbConnected(true);
-        }
-      } catch (err) {
-        console.error("Supabase error:", err);
-        setDbConnected(false);
-      } finally {
-        setLoading(false);
-      }
+        if (data && data.length > 0) { setRawIncidents(data); setDbConnected(true); }
+      } catch (err) { console.error("Supabase error:", err); setDbConnected(false); }
+      finally { setLoading(false); }
     }
-
     async function fetchLastScan() {
       try {
-        const { data } = await supabase
-          .from("scan_log")
-          .select("scan_time, incidents_added")
-          .order("scan_time", { ascending: false })
-          .limit(1);
-        if (data && data.length > 0) {
-          setLastScan(new Date(data[0].scan_time).toLocaleString("he-IL"));
-        }
+        const { data } = await supabase.from("scan_log").select("scan_time, incidents_added").order("scan_time", { ascending: false }).limit(1);
+        if (data && data.length > 0) { setLastScan(new Date(data[0].scan_time).toLocaleString("he-IL")); }
       } catch {}
     }
-
-    fetchData();
-    fetchLastScan();
-
+    fetchData(); fetchLastScan();
     const t = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(t);
   }, []);
 
-  // Process data
-  const { YEARLY, DEVICE_PIE, MONTHLY, DISTRICTS, INCIDENTS_LIST, years } = useMemo(
-    () => processIncidents(rawIncidents),
-    [rawIncidents]
-  );
+  const { DEVICE_PIE, MONTHLY, DISTRICTS, INCIDENTS_LIST, years } = useMemo(() => processIncidents(rawIncidents), [rawIncidents]);
+  const currentYear = now.getFullYear();
+
+  const COMBINED_ANNUAL = useMemo(() => {
+    const data = ANNUAL_STATS.map(s => ({ y: `'${String(s.year).slice(2)}`, year: s.year, fires: s.fires, fatalities: s.fatalities, source: s.source, isOfficial: true }));
+    const dbYears = new Set<number>();
+    rawIncidents.forEach(inc => { const yr = new Date(inc.incident_date).getFullYear(); if (yr > 2024) dbYears.add(yr); });
+    Array.from(dbYears).sort().forEach(yr => {
+      const yrInc = rawIncidents.filter(inc => new Date(inc.incident_date).getFullYear() === yr);
+      data.push({ y: `'${String(yr).slice(2)}*`, year: yr, fires: yrInc.length, fatalities: yrInc.reduce((s, inc) => s + (inc.fatalities || 0), 0), source: "סריקת מדיה (DB)", isOfficial: false });
+    });
+    return data;
+  }, [rawIncidents]);
+
+  const latestYear = COMBINED_ANNUAL[COMBINED_ANNUAL.length - 1];
+  const prevYear = COMBINED_ANNUAL.length >= 2 ? COMBINED_ANNUAL[COMBINED_ANNUAL.length - 2] : null;
+  const growthPct = prevYear && prevYear.fires > 0 ? Math.round(((latestYear?.fires || 0) - prevYear.fires) / prevYear.fires * 100) : 0;
+  const totalFires = COMBINED_ANNUAL.reduce((s, d) => s + d.fires, 0);
+  const totalFatalities = COMBINED_ANNUAL.reduce((s, d) => s + d.fatalities, 0);
 
   const tabs = [
     { id: "home", icon: "⬡", label: "ראשי" },
@@ -330,7 +355,6 @@ export default function LithiumDashboard() {
     { id: "list", icon: "☰", label: "אירועים" },
     { id: "system", icon: "⚙", label: "מערכת" },
   ];
-
   const tip = { contentStyle: { background: "#1c1917", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, fontSize: 12, fontFamily: "sans-serif" }, labelStyle: { color: "#fafaf9" } };
 
   if (loading) {
@@ -345,26 +369,8 @@ export default function LithiumDashboard() {
     );
   }
 
-  // Current year stats
-  const currentYear = now.getFullYear();
-  const curYearData = YEARLY.find(y => y.year === currentYear);
-  const prevYearData = YEARLY.find(y => y.year === currentYear - 1);
-  const changePct = prevYearData && prevYearData.fires > 0
-    ? Math.round(((curYearData?.fires || 0) - prevYearData.fires) / prevYearData.fires * 100)
-    : 0;
-  const isPartial = true; // current year is always partial until Dec 31
-
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "linear-gradient(175deg, #1a0c02 0%, #0d0d0d 25%, #111010 60%, #0a0a0a 100%)",
-      color: "#fafaf9",
-      fontFamily: "'Rubik', -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif",
-      maxWidth: 430,
-      margin: "0 auto",
-      position: "relative",
-      overflow: "hidden",
-    }}>
+    <div style={{ minHeight: "100vh", background: "linear-gradient(175deg, #1a0c02 0%, #0d0d0d 25%, #111010 60%, #0a0a0a 100%)", color: "#fafaf9", fontFamily: "'Rubik', -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif", maxWidth: 430, margin: "0 auto", position: "relative", overflow: "hidden" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800;900&display=swap');`}</style>
       <div style={{ position: "fixed", top: -100, left: "50%", transform: "translateX(-50%)", width: 500, height: 350, background: "radial-gradient(ellipse, rgba(249,115,22,0.1) 0%, rgba(239,68,68,0.05) 40%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
 
@@ -384,45 +390,41 @@ export default function LithiumDashboard() {
           </div>
         </div>
         <div style={{ fontSize: 11, color: "#57534e", marginTop: 6 }}>
-          {dbConnected ? `${rawIncidents.length} אירועים במסד הנתונים` : "נתונים סטטיים"} • {now.toLocaleDateString("he-IL")}
+          נתונים רשמיים 2017-2024 + {rawIncidents.length} אירועים פרטניים ב-DB • {now.toLocaleDateString("he-IL")}
           {lastScan && <span> • סריקה אחרונה: {lastScan}</span>}
         </div>
       </div>
 
-      {/* Content */}
       <div style={{ padding: "0 14px 100px", position: "relative", zIndex: 10 }}>
 
         {/* ===== HOME ===== */}
         {tab === "home" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Alert */}
             <div style={{ padding: "12px 14px", borderRadius: 16, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.12)", display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 18 }}>⚠️</span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>נתון מדאיג</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#fca5a5" }}>מגמה עולה מתמשכת</div>
                 <div style={{ fontSize: 11, color: "#a8a29e", lineHeight: 1.5 }}>
-                  {rawIncidents.length} אירועים מתועדים • {curYearData?.deaths || 0} הרוגים ב-{currentYear}{isPartial ? " (עד כה)" : ""} • {curYearData?.fires || 0} שריפות
+                  עלייה של {Math.round(((ANNUAL_STATS[ANNUAL_STATS.length - 1].fires - ANNUAL_STATS[0].fires) / ANNUAL_STATS[0].fires) * 100)}% משנת {ANNUAL_STATS[0].year} • ~5 הרוגים בשנה בממוצע • ~150 דירות נשרפות בשנה
                 </div>
               </div>
             </div>
 
-            {/* Hero */}
             <div style={{ padding: 22, borderRadius: 22, background: "linear-gradient(135deg, rgba(239,68,68,0.12), rgba(249,115,22,0.08), rgba(251,191,36,0.04))", border: "1px solid rgba(249,115,22,0.12)", position: "relative", overflow: "hidden" }}>
               <div style={{ position: "absolute", top: -25, left: -25, width: 100, height: 100, borderRadius: "50%", background: "rgba(249,115,22,0.06)", filter: "blur(25px)" }} />
-              <div style={{ fontSize: 11, color: "#d6d3d1", fontWeight: 500 }}>סה״כ אירועים מתועדים {currentYear}{isPartial ? " (חלקי)" : ""}</div>
-              <div style={{ fontSize: 52, fontWeight: 900, letterSpacing: -3, lineHeight: 1, marginTop: 4 }}>{curYearData?.fires || 0}</div>
+              <div style={{ fontSize: 11, color: "#d6d3d1", fontWeight: 500 }}>סה״כ שריפות מתועדות 2017-{latestYear?.year}</div>
+              <div style={{ fontSize: 52, fontWeight: 900, letterSpacing: -3, lineHeight: 1, marginTop: 4 }}>{totalFires.toLocaleString()}</div>
               <div style={{ display: "flex", gap: 16, marginTop: 14 }}>
-                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#ef4444" }}>{curYearData?.deaths || 0}</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> הרוגים</span></div>
-                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#f97316" }}>{curYearData?.injuries || 0}</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> פצועים</span></div>
-                <div style={{ marginRight: "auto" }}><span style={{ fontSize: 14, fontWeight: 800, color: changePct > 0 ? "#ef4444" : "#34d399" }}>{changePct > 0 ? "▲" : "▼"} {Math.abs(changePct)}%</span><span style={{ fontSize: 10, color: "#78716c", marginRight: 4 }}> מ-{currentYear-1}</span></div>
+                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#ef4444" }}>{totalFatalities}</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> הרוגים</span></div>
+                <div><span style={{ fontSize: 20, fontWeight: 800, color: "#f97316" }}>~150</span><span style={{ fontSize: 12, color: "#a8a29e", marginRight: 4 }}> דירות/שנה</span></div>
+                <div style={{ marginRight: "auto" }}><span style={{ fontSize: 14, fontWeight: 800, color: growthPct > 0 ? "#ef4444" : "#34d399" }}>{growthPct > 0 ? "▲" : "▼"} {Math.abs(growthPct)}%</span><span style={{ fontSize: 10, color: "#78716c", marginRight: 4 }}> {latestYear?.year} מ-{prevYear?.year}</span></div>
               </div>
             </div>
 
-            {/* Mini stats */}
             <div style={{ display: "flex", gap: 8 }}>
               {[
-                { v: `${rawIncidents.length}`, l: "סה״כ אירועים", icon: "🏠", col: "#f97316" },
-                { v: `${DISTRICTS[0]?.pct || 0}%`, l: `${DISTRICTS[0]?.n || ""}`, icon: "📍", col: "#fbbf24" },
+                { v: `${latestYear?.fires || 0}`, l: `שריפות ${latestYear?.year}`, icon: "🔥", col: "#f97316" },
+                { v: "~60%", l: "מחוז דן", icon: "📍", col: "#fbbf24" },
                 { v: "34%", l: "טעינת יתר", icon: "🔌", col: "#ef4444" },
               ].map((s, i) => (
                 <div key={i} style={{ flex: 1, padding: "12px 8px", borderRadius: 16, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)", textAlign: "center" }}>
@@ -433,83 +435,147 @@ export default function LithiumDashboard() {
               ))}
             </div>
 
-            {/* Yearly trend */}
+            {/* ANNUAL CHART */}
             <div style={{ padding: 18, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>📈 מגמה שנתית — שריפות סוללות ליתיום</div>
-              <ResponsiveContainer width="100%" height={170}>
-                <AreaChart data={YEARLY} margin={{ left: 5, right: 5, bottom: 5 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>📊 סטטיסטיקה שנתית — כבאות והצלה</div>
+              <div style={{ fontSize: 10, color: "#78716c", marginBottom: 12 }}>נתונים רשמיים • * = סריקת מדיה (חלקי)</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <ComposedChart data={COMBINED_ANNUAL} margin={{ left: 5, right: 5, bottom: 5 }}>
                   <defs>
                     <linearGradient id="fireGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#f97316" stopOpacity={0.35} />
                       <stop offset="100%" stopColor="#f97316" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="y" tick={{ fill: "#78716c", fontSize: 9.5 }} axisLine={false} tickLine={false} interval={0} />
+                  <XAxis dataKey="y" tick={{ fill: "#78716c", fontSize: 10 }} axisLine={false} tickLine={false} interval={0} />
                   <YAxis hide />
-                  <Tooltip {...tip} />
-                  <Area type="monotone" dataKey="fires" stroke="#f97316" fill="url(#fireGrad)" strokeWidth={2.5} dot={{ r: 3.5, fill: "#f97316", strokeWidth: 0 }} name="שריפות" />
-                </AreaChart>
+                  <Tooltip {...tip}
+                    formatter={(value: any, name: string) => {
+                      if (name === "שריפות") return [value, "🔥 שריפות"];
+                      if (name === "הרוגים") return [value, "💀 הרוגים"];
+                      return [value, name];
+                    }}
+                    labelFormatter={(label: string) => {
+                      const item = COMBINED_ANNUAL.find(d => d.y === label);
+                      return item ? `${item.year} (${item.source})` : label;
+                    }}
+                  />
+                  <Area type="monotone" dataKey="fires" stroke="#f97316" fill="url(#fireGrad)" strokeWidth={2.5}
+                    dot={(props: any) => {
+                      const item = COMBINED_ANNUAL[props.index];
+                      return (<circle key={props.index} cx={props.cx} cy={props.cy} r={4} fill={item?.isOfficial ? "#f97316" : "#fbbf24"} stroke={item?.isOfficial ? "none" : "#fff"} strokeWidth={item?.isOfficial ? 0 : 1} strokeDasharray={item?.isOfficial ? "" : "2 2"} />);
+                    }}
+                    name="שריפות" />
+                  <Bar dataKey="fatalities" fill="#ef4444" barSize={10} radius={[4, 4, 0, 0]} name="הרוגים" opacity={0.7} />
+                </ComposedChart>
               </ResponsiveContainer>
-              <div style={{ fontSize: 10, color: "#78716c", marginTop: 6, textAlign: "center" }}>
-                * {currentYear} נתונים חלקיים | מקור: Supabase DB — {rawIncidents.length} אירועים
+
+              <div style={{ marginTop: 12, borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1.5fr", gap: 4, fontSize: 9, color: "#78716c", fontWeight: 700, marginBottom: 6, textAlign: "center" }}>
+                  <div>שנה</div><div>שריפות</div><div>הרוגים</div><div>מקור</div>
+                </div>
+                {COMBINED_ANNUAL.map(d => (
+                  <div key={d.year} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1.5fr", gap: 4, fontSize: 10, textAlign: "center", padding: "3px 0", borderBottom: "1px solid rgba(255,255,255,0.02)" }}>
+                    <div style={{ color: "#a8a29e", fontWeight: 700 }}>{d.year}</div>
+                    <div style={{ color: "#f97316", fontWeight: 800 }}>{d.fires}</div>
+                    <div style={{ color: d.fatalities > 0 ? "#ef4444" : "#57534e", fontWeight: 700 }}>{d.fatalities || "—"}</div>
+                    <div style={{ color: "#78716c", fontSize: 9 }}>{d.source}{!d.isOfficial ? " *" : ""}</div>
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* Pie */}
-            <div style={{ padding: 18, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>📱 פילוח שריפות לפי סוג המכשיר</div>
-              {selPie && <div style={{ fontSize: 13, color: DEVICE_PIE.find(d=>d.n===selPie)?.c || "#f97316", fontWeight: 700, marginTop: 4 }}>{selPie}</div>}
-              <div style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
-                <ResponsiveContainer width="45%" height={130}>
-                  <PieChart>
-                    <Pie data={DEVICE_PIE} cx="50%" cy="50%" innerRadius={28} outerRadius={55} paddingAngle={3} dataKey="v" stroke="none"
-                      onClick={(_, idx) => setSelPie(DEVICE_PIE[idx]?.n === selPie ? null : DEVICE_PIE[idx]?.n || null)}>
-                      {DEVICE_PIE.map((d, i) => <Cell key={i} fill={d.c} opacity={selPie && selPie !== d.n ? 0.3 : 1} style={{ cursor: "pointer", transition: "opacity 0.2s" }} />)}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ flex: 1 }}>
-                  {DEVICE_PIE.map(d => {
-                    const total = DEVICE_PIE.reduce((s, x) => s + x.v, 0);
-                    const pct = Math.round(d.v / total * 100);
-                    return (
-                      <div key={d.n} onClick={() => setSelPie(selPie === d.n ? null : d.n)}
-                        style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4, cursor: "pointer", opacity: selPie && selPie !== d.n ? 0.4 : 1, transition: "opacity 0.2s" }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 3, background: d.c, flexShrink: 0 }} />
-                        <span style={{ fontSize: 10, color: "#a8a29e", flex: 1 }}>{d.n}</span>
-                        <span style={{ fontSize: 11, fontWeight: 800 }}>{pct}%</span>
-                      </div>
-                    );
-                  })}
+            {/* 2019 BREAKDOWN */}
+            <div style={{ padding: 16, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
+              <div onClick={() => setShowBreakdown2019(!showBreakdown2019)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>📱 פילוח לפי סוג אמצעי (2019)</div>
+                <span style={{ fontSize: 12, color: "#78716c" }}>{showBreakdown2019 ? "▲" : "▼"}</span>
+              </div>
+              <div style={{ fontSize: 10, color: "#78716c", marginTop: 4 }}>השנה היחידה עם פילוח פומבי מלא (כלכליסט)</div>
+              {showBreakdown2019 && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <ResponsiveContainer width="45%" height={120}>
+                      <PieChart>
+                        <Pie data={DEVICE_BREAKDOWN_2019.map(d => ({ name: d.name, value: d.count }))} cx="50%" cy="50%" innerRadius={25} outerRadius={50} paddingAngle={3} dataKey="value" stroke="none">
+                          {DEVICE_BREAKDOWN_2019.map((d, i) => <Cell key={i} fill={d.color} />)}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ flex: 1 }}>
+                      {DEVICE_BREAKDOWN_2019.map(d => (
+                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 3, background: d.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: 10, color: "#a8a29e", flex: 1 }}>{d.name}</span>
+                          <span style={{ fontSize: 10, color: "#78716c" }}>{d.count}</span>
+                          <span style={{ fontSize: 11, fontWeight: 800 }}>{d.pct}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 10, color: "#57534e", marginTop: 8, padding: 8, borderRadius: 8, background: "rgba(249,115,22,0.04)" }}>
+                    ℹ️ שנים 2020-2024: לא פורסם פילוח. כבאות מציינים "הרוב המוחלט מאופניים חשמליים". פילוח מלא קיים רק במערכת הפנימית.
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* DB PIE */}
+            {DEVICE_PIE.length > 0 && (
+              <div style={{ padding: 18, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>📊 פילוח אירועים מה-DB ({rawIncidents.length})</div>
+                <div style={{ fontSize: 10, color: "#78716c", marginBottom: 8 }}>אירועים פרטניים שנאספו מסריקת מדיה</div>
+                {selPie && <div style={{ fontSize: 13, color: DEVICE_PIE.find(d => d.n === selPie)?.c || "#f97316", fontWeight: 700, marginTop: 4 }}>{selPie}</div>}
+                <div style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
+                  <ResponsiveContainer width="45%" height={130}>
+                    <PieChart>
+                      <Pie data={DEVICE_PIE} cx="50%" cy="50%" innerRadius={28} outerRadius={55} paddingAngle={3} dataKey="v" stroke="none"
+                        onClick={(_, idx) => setSelPie(DEVICE_PIE[idx]?.n === selPie ? null : DEVICE_PIE[idx]?.n || null)}>
+                        {DEVICE_PIE.map((d, i) => <Cell key={i} fill={d.c} opacity={selPie && selPie !== d.n ? 0.3 : 1} style={{ cursor: "pointer", transition: "opacity 0.2s" }} />)}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ flex: 1 }}>
+                    {DEVICE_PIE.map(d => {
+                      const total = DEVICE_PIE.reduce((s, x) => s + x.v, 0);
+                      const pct = Math.round(d.v / total * 100);
+                      return (
+                        <div key={d.n} onClick={() => setSelPie(selPie === d.n ? null : d.n)} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4, cursor: "pointer", opacity: selPie && selPie !== d.n ? 0.4 : 1, transition: "opacity 0.2s" }}>
+                          <div style={{ width: 8, height: 8, borderRadius: 3, background: d.c, flexShrink: 0 }} />
+                          <span style={{ fontSize: 10, color: "#a8a29e", flex: 1 }}>{d.n}</span>
+                          <span style={{ fontSize: 11, fontWeight: 800 }}>{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Smart Trend Analysis */}
+            {/* TREND */}
             <div style={{ padding: 16, borderRadius: 20, background: "linear-gradient(135deg, rgba(249,115,22,0.04), rgba(239,68,68,0.03))", border: "1px solid rgba(249,115,22,0.08)" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🧠 ניתוח מגמה חכם</div>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🧠 ניתוח מגמה</div>
               <div style={{ fontSize: 12, color: "#d6d3d1", lineHeight: 1.8 }}>
                 <div style={{ marginBottom: 8 }}>
-                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>מסד נתונים</span>
-                  <strong style={{ color: "#f97316" }}>{rawIncidents.length}</strong> אירועים מתועדים ב-DB. נתונים מ-{years[0] || "?"} עד {currentYear}.
+                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>מגמה</span>
+                  עלייה של <strong style={{ color: "#ef4444" }}>229%</strong> בשריפות מ-2017 (76) ל-2024 (250). גידול ממוצע ~20% בשנה.
                 </div>
                 <div style={{ marginBottom: 8 }}>
-                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(249,115,22,0.1)", color: "#fdba74", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>מגמה מחזורית</span>
-                  יוני-אוגוסט מהווים ~33% מהאירועים השנתיים. טמפרטורות מעל 35°C מגבירות סיכון ל-thermal runaway.
+                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(249,115,22,0.1)", color: "#fdba74", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>עונתיות</span>
+                  יוני-אוגוסט מהווים ~33% מהאירועים. טמפרטורות מעל 35°C מגבירות סיכון ל-thermal runaway.
                 </div>
                 <div style={{ marginBottom: 8 }}>
-                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(251,191,36,0.1)", color: "#fde68a", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>מיקוד גאוגרפי</span>
-                  {DISTRICTS[0] && <>~{DISTRICTS[0].pct}% מהאירועים ב{DISTRICTS[0].n}. צפיפות אוכלוסין + ריכוז שימוש באופניים חשמליים.</>}
+                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(251,191,36,0.1)", color: "#fde68a", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>גאוגרפיה</span>
+                  ~50-60% מהשריפות במחוז דן. צפיפות + ריכוז שימוש באופניים חשמליים.
                 </div>
                 <div>
-                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", color: "#93c5fd", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>חיבור DB</span>
-                  {dbConnected ? "✅ מחובר ל-Supabase — נתונים חיים" : "⚠️ לא מחובר — נתונים סטטיים"}
+                  <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, background: "rgba(59,130,246,0.1)", color: "#93c5fd", fontSize: 10, fontWeight: 700, marginLeft: 6 }}>נתוני 2025+</span>
+                  {dbConnected ? `✅ ${rawIncidents.filter(i => new Date(i.incident_date).getFullYear() >= 2025).length} אירועים מסריקת מדיה אוטומטית` : "⚠️ ממתין לחיבור DB"}
                 </div>
               </div>
             </div>
           </div>
         )}
-
         {/* ===== MAP ===== */}
         {tab === "map" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -517,27 +583,6 @@ export default function LithiumDashboard() {
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>🗺️ מפת חום — אירועים לפי עיר</div>
               <IsraelMap incidents={rawIncidents} />
             </div>
-
-            {selInc && (
-              <div style={{ padding: 16, borderRadius: 18, background: `rgba(${selInc.sevC === "#ef4444" ? "239,68,68" : "249,115,22"},0.06)`, border: `1px solid ${selInc.sevC}20`, position: "relative" }}>
-                <button onClick={() => setSelInc(null)} style={{ position: "absolute", top: 10, left: 10, background: "none", border: "none", color: "#78716c", fontSize: 16, cursor: "pointer" }}>✕</button>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                  <span style={{ fontSize: 28 }}>{selInc.icon}</span>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 700 }}>{selInc.type} — {selInc.city}</div>
-                    <div style={{ fontSize: 11, color: "#78716c" }}>{selInc.date} • {selInc.district}</div>
-                  </div>
-                </div>
-                <div style={{ fontSize: 12, color: "#d6d3d1", lineHeight: 1.7, marginBottom: 8 }}>{selInc.desc}</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 8, background: `${selInc.sevC}15`, color: selInc.sevC, fontWeight: 700 }}>{selInc.sev}</span>
-                  {selInc.d > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 8, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontWeight: 700 }}>💀 {selInc.d} הרוגים</span>}
-                  {selInc.i > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 8, background: "rgba(249,115,22,0.1)", color: "#fdba74", fontWeight: 700 }}>🤕 {selInc.i} פצועים</span>}
-                </div>
-              </div>
-            )}
-
-            {/* Districts */}
             <div style={{ padding: 16, borderRadius: 18, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📍 התפלגות לפי מחוז (מחושב מ-DB)</div>
               {DISTRICTS.map(d => (
@@ -572,6 +617,7 @@ export default function LithiumDashboard() {
                   ))}
                 </div>
               </div>
+              <div style={{ fontSize: 10, color: "#78716c", marginBottom: 8 }}>נתונים חודשיים מאירועים פרטניים ב-DB בלבד</div>
               <ResponsiveContainer width="100%" height={170}>
                 <BarChart data={MONTHLY[seasonYear] || []} barSize={16}>
                   <XAxis dataKey="m" tick={{ fill: "#78716c", fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -585,23 +631,11 @@ export default function LithiumDashboard() {
               <div style={{ fontSize: 11, color: "#a8a29e", marginTop: 8, padding: 10, borderRadius: 10, background: "rgba(249,115,22,0.05)" }}>
                 💡 שיא בקיץ — חום סביבתי מגביר thermal runaway בסוללות
               </div>
+              <div style={{ fontSize: 10, color: "#57534e", marginTop: 6, padding: 8, borderRadius: 8, background: "rgba(59,130,246,0.04)" }}>
+                ℹ️ <strong>לגבי נתונים חודשיים רשמיים:</strong> כבאות והצלה לא מפרסמים נתונים ברמה חודשית לציבור. הנתונים כאן הם מאירועים פרטניים שנאספו מסריקת מדיה ({rawIncidents.filter(i => new Date(i.incident_date).getFullYear() === seasonYear).length} מתוך {ANNUAL_STATS.find(s => s.year === seasonYear)?.fires || "?"} שריפות ב-{seasonYear}).
+              </div>
             </div>
 
-            {/* Deaths & Injuries */}
-            <div style={{ padding: 18, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>💀 הרוגים ופצועים לפי שנה</div>
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={YEARLY} barGap={4}>
-                  <XAxis dataKey="y" tick={{ fill: "#78716c", fontSize: 9.5 }} axisLine={false} tickLine={false} interval={0} />
-                  <YAxis hide />
-                  <Tooltip {...tip} />
-                  <Bar dataKey="deaths" fill="#ef4444" name="הרוגים" radius={[4, 4, 0, 0]} barSize={12} />
-                  <Bar dataKey="injuries" fill="#f97316" name="פצועים" radius={[4, 4, 0, 0]} barSize={12} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Causes */}
             <div style={{ padding: 18, borderRadius: 20, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🔍 גורמי התלקחות</div>
               <div style={{ fontSize: 10, color: "#78716c", marginBottom: 10 }}>מקור: כבאות והצלה</div>
@@ -633,8 +667,7 @@ export default function LithiumDashboard() {
                   background: selInc?.id === inc.id ? "rgba(249,115,22,0.05)" : "rgba(255,255,255,0.015)",
                   border: `1px solid ${selInc?.id === inc.id ? "rgba(249,115,22,0.12)" : "rgba(255,255,255,0.03)"}`,
                   cursor: "pointer", transition: "all 0.25s ease",
-                }}
-              >
+                }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{ width: 38, height: 38, borderRadius: 12, background: `${inc.sevC}10`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{inc.icon}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -659,11 +692,9 @@ export default function LithiumDashboard() {
             ))}
           </div>
         )}
-
-        {/* ===== SYSTEM ===== */}
+{/* ===== SYSTEM ===== */}
         {tab === "system" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* DB Status */}
             <div style={{ padding: 18, borderRadius: 20, background: "linear-gradient(135deg, rgba(34,197,94,0.06), rgba(59,130,246,0.04))", border: `1px solid ${dbConnected ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 11, background: dbConnected ? "linear-gradient(135deg, #22c55e, #3b82f6)" : "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🗄️</div>
@@ -675,7 +706,7 @@ export default function LithiumDashboard() {
               <div style={{ display: "flex", gap: 8 }}>
                 {[
                   { v: String(rawIncidents.length), l: "אירועים ב-DB", col: "#22c55e" },
-                  { v: String(years.length), l: "שנים", col: "#3b82f6" },
+                  { v: String(ANNUAL_STATS.length), l: "שנים רשמיות", col: "#3b82f6" },
                   { v: lastScan ? "✅" : "—", l: "סריקה אחרונה", col: "#f97316" },
                 ].map((s, i) => (
                   <div key={i} style={{ flex: 1, textAlign: "center", padding: 10, borderRadius: 12, background: "rgba(255,255,255,0.03)" }}>
@@ -687,16 +718,24 @@ export default function LithiumDashboard() {
             </div>
 
             <div style={{ padding: 16, borderRadius: 18, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>🏗️ ארכיטקטורה</div>
+              <div style={{ fontSize: 11, color: "#a8a29e", lineHeight: 1.8 }}>
+                <div style={{ marginBottom: 6 }}><strong style={{ color: "#f97316" }}>שכבה 1:</strong> סטטיסטיקה שנתית 2017-2024 (נתונים רשמיים hardcoded)</div>
+                <div style={{ marginBottom: 6 }}><strong style={{ color: "#fbbf24" }}>שכבה 2:</strong> אירועים פרטניים ב-Supabase (131 אירועים מסריקת מדיה)</div>
+                <div style={{ marginBottom: 6 }}><strong style={{ color: "#22c55e" }}>שכבה 3:</strong> RSS + Gemini סורק מדיה אוטומטי (כל 6 שעות)</div>
+                <div><strong style={{ color: "#3b82f6" }}>2026+:</strong> נתונים חדשים יוזנו אוטומטית ויופיעו בגרף השנתי</div>
+              </div>
+            </div>
+
+            <div style={{ padding: 16, borderRadius: 18, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📰 מקורות מידע</div>
               {[
-                { icon: "🚒", name: "כבאות והצלה", det: "דוברות ארצית + מחוזות, אתר 102, פייסבוק, טלגרם", col: "#ef4444" },
-                { icon: "📰", name: "חדשות ארציות", det: "ynet, כלכליסט, הארץ, וואלה, מעריב, גלובס, מאקו, חדשות 13/12", col: "#f97316" },
-                { icon: "📍", name: "חדשות מקומיות", det: "חי פה, NWS, ניוזים, כיכר השבת, JDN, כל רגע, חדשות הנגב", col: "#fbbf24" },
-                { icon: "🏛️", name: "ממשלתי", det: "משרד התחבורה, המשרד להגנת הסביבה, רשות הכבאות", col: "#34d399" },
-                { icon: "🚑", name: "שירותי חירום", det: "מד\"א, איחוד הצלה — טלגרם + אתרים", col: "#60a5fa" },
-                { icon: "🌐", name: "בינלאומי", det: "Times of Israel, EV FireSafe, Reuters", col: "#a78bfa" },
+                { icon: "🚒", name: "כבאות והצלה", det: "דוברות ארצית + מחוזות, אתר 102", col: "#ef4444" },
+                { icon: "📰", name: "חדשות ארציות", det: "ynet, כלכליסט, הארץ, וואלה, מעריב, מאקו", col: "#f97316" },
+                { icon: "📍", name: "חדשות מקומיות", det: "חי פה, NWS, ניוזים, כיכר השבת, JDN", col: "#fbbf24" },
+                { icon: "🏛️", name: "ממשלתי", det: "משרד התחבורה, רשות הכבאות, מרכז המחקר של הכנסת", col: "#34d399" },
               ].map((s, i) => (
-                <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: i < 5 ? "1px solid rgba(255,255,255,0.03)" : "none" }}>
+                <div key={i} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: i < 3 ? "1px solid rgba(255,255,255,0.03)" : "none" }}>
                   <span style={{ fontSize: 18 }}>{s.icon}</span>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: s.col }}>{s.name}</div>
@@ -706,33 +745,23 @@ export default function LithiumDashboard() {
               ))}
             </div>
 
-            {/* Credits */}
             <div style={{ padding: 14, borderRadius: 14, background: "linear-gradient(135deg, rgba(249,115,22,0.06), rgba(251,191,36,0.04))", border: "1px solid rgba(249,115,22,0.1)" }}>
               <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>👨‍💻 אודות</div>
               <div style={{ fontSize: 12, color: "#d6d3d1", lineHeight: 1.7 }}>
                 פותח על ידי <strong style={{ color: "#f97316" }}>רועי צוקרמן</strong> ככלי ניסיוני
               </div>
               <div style={{ fontSize: 10, color: "#78716c", marginTop: 4 }}>
-                Next.js + Supabase + Gemini AI • גרסה 2.0
+                Next.js + Supabase + Gemini AI • גרסה 3.0
               </div>
             </div>
 
-            {/* Legal */}
             <div style={{ padding: 14, borderRadius: 14, background: "rgba(239,68,68,0.03)", border: "1px solid rgba(239,68,68,0.08)" }}>
               <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8, color: "#fca5a5" }}>⚠️ אזהרות שימוש</div>
               <div style={{ fontSize: 10.5, color: "#a8a29e", lineHeight: 1.8 }}>
-                <div style={{ marginBottom: 6 }}>
-                  <strong style={{ color: "#d6d3d1" }}>1. כלי ניסיוני בלבד</strong> — מערכת זו פותחה כפרויקט ניסיוני ואינה מהווה מערכת רשמית.
-                </div>
-                <div style={{ marginBottom: 6 }}>
-                  <strong style={{ color: "#d6d3d1" }}>2. אין לסמוך על הנתונים</strong> — המידע נאסף ממקורות ציבוריים ועלול להכיל אי-דיוקים.
-                </div>
-                <div style={{ marginBottom: 6 }}>
-                  <strong style={{ color: "#d6d3d1" }}>3. אין אחריות</strong> — המפתח אינו נושא באחריות לנזק שעלול להיגרם משימוש במידע.
-                </div>
-                <div>
-                  <strong style={{ color: "#d6d3d1" }}>4. מקורות רשמיים</strong> — למידע מדויק יש לפנות לנציבות כבאות והצלה לישראל.
-                </div>
+                <div style={{ marginBottom: 6 }}><strong style={{ color: "#d6d3d1" }}>1. כלי ניסיוני</strong> — מערכת זו פותחה כפרויקט ניסיוני ואינה מערכת רשמית.</div>
+                <div style={{ marginBottom: 6 }}><strong style={{ color: "#d6d3d1" }}>2. נתונים חלקיים</strong> — ~3% מהשריפות מקבלות כיסוי תקשורתי מפורט. הנתונים השנתיים הרשמיים מלאים.</div>
+                <div style={{ marginBottom: 6 }}><strong style={{ color: "#d6d3d1" }}>3. אין אחריות</strong> — המפתח אינו נושא באחריות לנזק.</div>
+                <div><strong style={{ color: "#d6d3d1" }}>4. מקורות רשמיים</strong> — למידע מדויק יש לפנות לנציבות כבאות והצלה לישראל.</div>
               </div>
             </div>
           </div>
@@ -764,8 +793,8 @@ export default function LithiumDashboard() {
       {/* Footer */}
       <div style={{ textAlign: "center", padding: "0 20px 100px", fontSize: 9, color: "#44403c", lineHeight: 1.6, position: "relative", zIndex: 10 }}>
         פותח ע"י <strong style={{ color: "#78716c" }}>רועי צוקרמן</strong> • כלי ניסיוני<br />
-        {dbConnected ? `מחובר ל-Supabase • ${rawIncidents.length} אירועים` : "נתונים סטטיים"} • {now.toLocaleDateString("he-IL")}
+        נתונים רשמיים 2017-2024 + {rawIncidents.length} אירועים ב-DB • {now.toLocaleDateString("he-IL")}
       </div>
     </div>
   );
-}
+                }
