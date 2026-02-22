@@ -180,7 +180,7 @@ export async function GET(request: Request) {
         if (stopped) { log('נעצר', 'log-warn'); break; }
         await runTask(tasks[i], i);
         // Small delay to avoid rate limits
-        if (!stopped) await new Promise(r => setTimeout(r, 4000));
+        if (!stopped) await new Promise(r => setTimeout(r, 6000));
       }
 
       document.getElementById("status").textContent = stopped ? "נעצר" : "הסתיים!";
