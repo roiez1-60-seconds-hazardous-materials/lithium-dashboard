@@ -85,7 +85,18 @@ export async function GET(request: Request) {
       }
     }
 
-    // 2. Telegram queries
+    // 2. Gemini knowledge for each month (best source!)
+    for (let year = ${fromYear}; year <= ${toYear}; year++) {
+      const maxMonth = (year === ${toYear}) ? ${toMonth} : 12;
+      for (let month = 1; month <= maxMonth; month++) {
+        tasks.push({
+          label: "Gemini " + year + "/" + String(month).padStart(2,"0"),
+          url: "/api/scan-archive?year=" + year + "&month=" + month + "&mode=gemini"
+        });
+      }
+    }
+
+    // 3. Telegram queries
     const tgQueries = [
       { channel: "uh1221", q: "סוללה" },
       { channel: "uh1221", q: "התלקחות" },
