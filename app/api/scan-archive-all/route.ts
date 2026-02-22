@@ -166,15 +166,15 @@ export async function GET(request: Request) {
       log("🚀 מתחיל סריקה — " + tasks.length + " משימות", "log-info");
 
       for (let i = 0; i < tasks.length; i++) {
-        if (stopped) { log("⏹ נעצר ע\"י המשתמש", "log-warn"); break; }
+        if (stopped) { log('נעצר', 'log-warn'); break; }
         await runTask(tasks[i], i);
         // Small delay to avoid rate limits
         if (!stopped) await new Promise(r => setTimeout(r, 2000));
       }
 
-      document.getElementById("status").textContent = stopped ? "נעצר" : "✅ הסתיים!";
+      document.getElementById("status").textContent = stopped ? "נעצר" : "הסתיים!";
       document.getElementById("startBtn").disabled = false;
-      log("📊 סה\"כ: " + stats.found + " אירועים, " + stats.inserted + " נוספו, " + stats.dups + " כפילויות", "log-ok");
+      log('סיכום: ' + stats.found + ' אירועים, ' + stats.inserted + ' נוספו, ' + stats.dups + ' כפילויות', 'log-ok');
     }
 
     function stopScan() { stopped = true; }
