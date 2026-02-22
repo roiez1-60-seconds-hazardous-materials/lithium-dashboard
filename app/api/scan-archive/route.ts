@@ -1,8 +1,7 @@
 // app/api/scan-archive/route.ts
-// V3 — Deep archive scanner for past lithium battery fire incidents
-// Sources: Google News (date-filtered), Telegram history, Gemini knowledge
-// Usage: /api/scan-archive?year=2025 or /api/scan-archive?year=2025&month=6
-// Also: /api/scan-archive?from=2024-01-01&to=2024-12-31
+// V5 — Two modes:
+// Default:  Gemini knowledge scan per month  → ?year=2024&month=6
+// Telegram: Scan one telegram channel        → ?telegram=fireisrael777&q=סוללה
 
 export const runtime = "edge";
 export const maxDuration = 60;
@@ -11,205 +10,7 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
 const GEMINI_KEY = process.env.GEMINI_API_KEY!;
 
-// ============================================
-// Google News archive search (date-filtered)
-// ============================================
-async function searchGoogleNewsArchive(query: string, dateAfter: string, dateBefore: string): Promise<string[]> {
-  const items: string[] = [];
-  try {
-    // Google News RSS supports date filtering via after: and before: in query
-    const fullQuery = `${query}+after:${dateAfter}+before:${dateBefore}`;
-    const url = `https://news.google.com/rss/search?q=${fullQuery}&hl=he&gl=IL&ceid=IL:he`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return [];
-    const text = await res.text();
-
-    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
-    let match;
-    while ((match = itemRegex.exec(text)) !== null) {
-      const item = match[1];
-      const title = item.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/)?.[1] || "";
-      const link = item.match(/<link>(.*?)<\/link>/)?.[1] || "";
-      const pubDate = item.match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || "";
-      const sourceName = item.match(/<source[^>]*>(.*?)<\/source>/)?.[1] || "Google News";
-
-      if (title.length > 10) {
-        items.push(JSON.stringify({ title, desc: title, link, pubDate, source: `google_archive (${sourceName})` }));
-      }
-    }
-  } catch {}
-  return items;
-}
-
-// ============================================
-// Telegram archive search (scroll back)
-// ============================================
-async function searchTelegramArchive(channel: string, query: string): Promise<string[]> {
-  const items: string[] = [];
-  try {
-    // Telegram public channel search via t.me/s/
-    const url = `https://t.me/s/${channel}?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10000),
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    // Extract messages
-    const msgRegex = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
-    // Extract dates
-    const dateRegex = /<time[^>]*datetime="([^"]*)"[^>]*>/gi;
-    const dates: string[] = [];
-    let dateMatch;
-    while ((dateMatch = dateRegex.exec(html)) !== null) {
-      dates.push(dateMatch[1]);
-    }
-
-    let msgMatch;
-    let msgIndex = 0;
-    while ((msgMatch = msgRegex.exec(html)) !== null) {
-      const text = msgMatch[1]
-        .replace(/<br\s*\/?>/gi, " ")
-        .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .trim();
-
-      if (text.length > 20) {
-        items.push(JSON.stringify({
-          title: text.substring(0, 200),
-          desc: text.substring(0, 500),
-          link: `https://t.me/s/${channel}`,
-          pubDate: dates[msgIndex] || new Date().toISOString(),
-          source: `telegram_archive (@${channel})`,
-        }));
-      }
-      msgIndex++;
-    }
-  } catch {}
-  return items;
-}
-
-// ============================================
-// Gemini knowledge-based search (fallback)
-// ============================================
-async function askGeminiArchive(year: number, months: string): Promise<{ results: any[]; debug?: string }> {
-  const prompt = `רשום אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודשים ${months} ${year}.
-
-כללים:
-1. כלול רק: שריפה/פיצוץ/התלקחות של סוללת ליתיום יון
-2. סוגי מכשירים: אופניים חשמליים, קורקינט חשמלי, רכב חשמלי, טלפון נייד, מחשב נייד, UPS/גיבוי, סוללת כוח, קלנועית, כלי עבודה, אחר
-3. לא לכלול: תאונות דרכים רגילות, גניבות, חקיקה, כתבות כלליות
-4. מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
-5. חומרה: קל, בינוני, חמור, קריטי
-6. רק אירועים אמיתיים שדווחו בתקשורת!
-
-החזר JSON array בלבד, בלי markdown, בלי backticks:
-[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"חומרה","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
-
-אם אין אירועים החזר [].`;
-
-  try {
-    let retries = 3;
-    let res: Response | null = null;
-
-    while (retries > 0) {
-      res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-          }),
-        }
-      );
-      if (res.status === 429) {
-        retries--;
-        await new Promise(r => setTimeout(r, 6000)); // Wait 10s on rate limit
-        continue;
-      }
-      break;
-    }
-
-    if (!res || !res.ok) {
-      return { results: [], debug: `gemini_status_${res?.status || "null"}` };
-    }
-    const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    if (!text) return { results: [], debug: "gemini_empty_response" };
-
-    const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return { results: [], debug: `gemini_no_json: ${cleaned.substring(0, 200)}` };
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    return { results: Array.isArray(parsed) ? parsed : [], debug: `gemini_ok_${parsed.length}` };
-  } catch (e: any) {
-    return { results: [], debug: `gemini_error: ${e.message}` };
-  }
-}
-
-// ============================================
-// Analyze articles with Gemini
-// ============================================
-async function analyzeArticles(articles: string[]): Promise<any[]> {
-  if (articles.length === 0) return [];
-
-  const prompt = `אתה מנתח כתבות חדשות על שריפות סוללות ליתיום בישראל.
-
-כללים:
-1. כלול רק: שריפה/פיצוץ/התלקחות של סוללת ליתיום
-2. סוגי מכשירים: אופניים חשמליים, קורקינט חשמלי, רכב חשמלי, טלפון נייד, מחשב נייד, UPS/גיבוי, סוללת כוח, קלנועית, כלי עבודה, אחר
-3. מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
-4. אם אותו אירוע מופיע בכמה כתבות — דווח פעם אחת
-
-החזר JSON array בלבד:
-[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
-
-הכתבות:
-${articles.join("\n\n")}
-
-אם אין אירועים רלוונטיים החזר [].`;
-
-  try {
-    let retries = 3;
-    let res: Response | null = null;
-
-    while (retries > 0) {
-      res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
-          }),
-        }
-      );
-      if (res.status === 429) {
-        retries--;
-        await new Promise(r => setTimeout(r, 6000)); // Wait 10s on rate limit
-        continue;
-      }
-      break;
-    }
-
-    if (!res || !res.ok) return [];
-    const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return [];
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    return [];
-  }
-}
+const MONTH_NAMES = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
 
 // ============================================
 // Duplicate check
@@ -223,7 +24,6 @@ async function checkDuplicate(inc: any): Promise<boolean> {
     const existing = await res.json();
     if (Array.isArray(existing) && existing.length > 0) return true;
 
-    // Fuzzy: ±3 days
     const date = new Date(inc.incident_date);
     const before = new Date(date); before.setDate(before.getDate() - 3);
     const after = new Date(date); after.setDate(after.getDate() + 3);
@@ -233,233 +33,204 @@ async function checkDuplicate(inc: any): Promise<boolean> {
     });
     const fuzzyExisting = await fuzzyRes.json();
     return Array.isArray(fuzzyExisting) && fuzzyExisting.length > 0;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 // ============================================
-// Insert incidents to Supabase
+// Insert one incident
 // ============================================
-async function insertIncidents(incidents: any[]): Promise<{ inserted: number; duplicates: number }> {
-  let inserted = 0;
-  let duplicates = 0;
+async function insertIncident(inc: any, dataSource: string): Promise<boolean> {
+  const row = {
+    incident_date: inc.incident_date,
+    city: inc.city,
+    district: inc.district || "אחר",
+    device_type: inc.device_type,
+    severity: inc.severity || "בינוני",
+    injuries: inc.injuries || 0,
+    fatalities: inc.fatalities || 0,
+    property_damage: inc.property_damage !== false,
+    description: inc.description || "",
+    source_name: inc.source_name || "",
+    source_url: inc.source_url || "",
+    data_source: dataSource,
+    gemini_confidence: 0.7,
+    verified: false,
+  };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/incidents`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify(row),
+    });
+    return res.ok;
+  } catch { return false; }
+}
 
+// ============================================
+// Call Gemini
+// ============================================
+async function callGemini(prompt: string): Promise<string> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.15, maxOutputTokens: 8192 },
+      }),
+    }
+  );
+  if (!res.ok) throw new Error(`gemini_${res.status}`);
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+// ============================================
+// Parse JSON from Gemini response
+// ============================================
+function parseGeminiJson(text: string): any[] {
+  const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  const match = cleaned.match(/\[[\s\S]*\]/);
+  if (!match) return [];
+  try { return JSON.parse(match[0]); } catch { return []; }
+}
+
+// ============================================
+// MODE 1: Gemini Knowledge — one month
+// ============================================
+async function scanGeminiKnowledge(year: number, month: number) {
+  const monthName = MONTH_NAMES[month - 1];
+
+  const prompt = `רשום כל אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום יון שקרו בישראל בחודש ${monthName} ${year}.
+
+כלול: אופניים חשמליים, קורקינטים, רכבים חשמליים, קלנועיות, טלפונים, פאוורבנקים, UPS, מחשבים ניידים.
+לא לכלול: תאונות דרכים רגילות, גניבות, חקיקה, מאמרי דעה.
+רק אירועים אמיתיים שדווחו בתקשורת הישראלית!
+מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
+
+החזר JSON array בלבד. בלי markdown בלי backticks:
+[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
+אם אין — החזר []`;
+
+  const text = await callGemini(prompt);
+  const incidents = parseGeminiJson(text);
+
+  let inserted = 0, duplicates = 0;
   for (const inc of incidents) {
     if (!inc.incident_date || !inc.city || !inc.device_type) continue;
-
-    const isDup = await checkDuplicate(inc);
-    if (isDup) { duplicates++; continue; }
-
-    const row = {
-      incident_date: inc.incident_date,
-      city: inc.city,
-      district: inc.district || "אחר",
-      device_type: inc.device_type,
-      severity: inc.severity || "בינוני",
-      injuries: inc.injuries || 0,
-      fatalities: inc.fatalities || 0,
-      property_damage: inc.property_damage !== false,
-      description: inc.description || "",
-      source_name: inc.source_name || "",
-      source_url: inc.source_url || "",
-      data_source: "archive_scan_v3",
-      gemini_confidence: 0.7,
-      verified: false,
-    };
-
-    try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/incidents`, {
-        method: "POST",
-        headers: {
-          apikey: SUPABASE_SERVICE_KEY,
-          Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-          "Content-Type": "application/json",
-          Prefer: "return=minimal",
-        },
-        body: JSON.stringify(row),
-      });
-      if (res.ok) inserted++;
-    } catch {}
+    if (await checkDuplicate(inc)) { duplicates++; continue; }
+    if (await insertIncident(inc, "archive_gemini")) inserted++;
   }
 
-  return { inserted, duplicates };
+  return { period: `${monthName} ${year}`, found: incidents.length, inserted, duplicates };
 }
 
 // ============================================
-// MAIN
+// MODE 2: Telegram Archive — one channel, one query
+// ============================================
+async function scanTelegramArchive(channel: string, query: string) {
+  // Fetch telegram search results
+  const tgUrl = `https://t.me/s/${channel}?q=${encodeURIComponent(query)}`;
+  const tgRes = await fetch(tgUrl, {
+    signal: AbortSignal.timeout(10000),
+    headers: { "User-Agent": "Mozilla/5.0" },
+  });
+  if (!tgRes.ok) throw new Error(`telegram_${tgRes.status}`);
+  const html = await tgRes.text();
+
+  // Extract messages with dates
+  const messages: { text: string; date: string }[] = [];
+  const msgRegex = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
+  const dateRegex = /<time[^>]*datetime="([^"]*)"[^>]*>/gi;
+
+  const dates: string[] = [];
+  let dm;
+  while ((dm = dateRegex.exec(html)) !== null) dates.push(dm[1]);
+
+  let mm;
+  let idx = 0;
+  while ((mm = msgRegex.exec(html)) !== null) {
+    const text = mm[1].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
+    if (text.length > 20) {
+      messages.push({ text: text.substring(0, 500), date: dates[idx] || "" });
+    }
+    idx++;
+  }
+
+  if (messages.length === 0) {
+    return { channel, query, messages_found: 0, found: 0, inserted: 0, duplicates: 0 };
+  }
+
+  // Send to Gemini for analysis (one call for all messages)
+  const msgText = messages.map((m, i) => `[${i + 1}] (${m.date}) ${m.text}`).join("\n\n");
+
+  const prompt = `נתח את ההודעות הבאות מערוץ טלגרם ${channel} ומצא אירועי שריפה/התלקחות/פיצוץ של סוללות ליתיום בלבד.
+
+לא לכלול: תאונות דרכים רגילות, פינוי ללא שריפת סוללה, כתבות כלליות.
+מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
+
+החזר JSON array בלבד. בלי markdown בלי backticks:
+[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"telegram @${channel}","source_url":""}]
+אם אין אירועים רלוונטיים — החזר []
+
+ההודעות:
+${msgText}`;
+
+  const text = await callGemini(prompt);
+  const incidents = parseGeminiJson(text);
+
+  let inserted = 0, duplicates = 0;
+  for (const inc of incidents) {
+    if (!inc.incident_date || !inc.city || !inc.device_type) continue;
+    if (await checkDuplicate(inc)) { duplicates++; continue; }
+    if (await insertIncident(inc, `archive_telegram_${channel}`)) inserted++;
+  }
+
+  return { channel, query, messages_found: messages.length, found: incidents.length, inserted, duplicates };
+}
+
+// ============================================
+// MAIN HANDLER
 // ============================================
 export async function GET(request: Request) {
   const startTime = Date.now();
   const url = new URL(request.url);
 
-  // Parse params
-  const yearParam = url.searchParams.get("year");
-  const monthParam = url.searchParams.get("month");
-  const fromParam = url.searchParams.get("from");
-  const toParam = url.searchParams.get("to");
-  const mode = url.searchParams.get("mode") || "fast"; // fast=gemini only, full=all sources
-
-  let dateAfter: string;
-  let dateBefore: string;
-  let label: string;
-
-  if (fromParam && toParam) {
-    dateAfter = fromParam;
-    dateBefore = toParam;
-    label = `${fromParam} to ${toParam}`;
-  } else {
-    const year = yearParam ? parseInt(yearParam) : new Date().getFullYear();
-    if (monthParam) {
-      const month = parseInt(monthParam);
-      dateAfter = `${year}-${String(month).padStart(2, "0")}-01`;
-      const lastDay = new Date(year, month, 0).getDate();
-      dateBefore = `${year}-${String(month).padStart(2, "0")}-${lastDay}`;
-      label = `${year}-${String(month).padStart(2, "0")}`;
-    } else {
-      dateAfter = `${year}-01-01`;
-      dateBefore = `${year}-12-31`;
-      label = `${year}`;
-    }
-  }
-
-  const sources = { google_news: 0, telegram: 0, gemini_knowledge: 0 };
-  const allIncidents: any[] = [];
-  let uniqueGoogle: string[] = [];
-  let uniqueTelegram: string[] = [];
-
   try {
-    // === SOURCE 1: Google News Archive (only in mode=full) ===
-    if (mode === "full") {
-      const googleQueries = [
-        "שריפה+סוללת+ליתיום",
-        "התלקחות+אופניים+חשמליים",
-        "פיצוץ+סוללה+קורקינט",
-      ];
-
-      const googleArticles: string[] = [];
-      for (const q of googleQueries) {
-        const articles = await searchGoogleNewsArchive(q, dateAfter, dateBefore);
-        googleArticles.push(...articles);
-        await new Promise(r => setTimeout(r, 300));
-      }
-
-      const seenTitles = new Set<string>();
-      uniqueGoogle = googleArticles.filter(a => {
-        try {
-          const title = JSON.parse(a).title.substring(0, 50);
-          if (seenTitles.has(title)) return false;
-          seenTitles.add(title);
-          return true;
-        } catch { return false; }
-      });
-
-      sources.google_news = uniqueGoogle.length;
-
-      if (uniqueGoogle.length > 0) {
-        for (let i = 0; i < Math.min(uniqueGoogle.length, 10); i += 10) {
-          const batch = uniqueGoogle.slice(i, i + 10);
-          const incidents = await analyzeArticles(batch);
-          allIncidents.push(...incidents);
-        }
-      }
-      await new Promise(r => setTimeout(r, 3000));
+    // MODE 2: Telegram archive
+    const telegramParam = url.searchParams.get("telegram");
+    if (telegramParam) {
+      const query = url.searchParams.get("q") || "סוללה";
+      const result = await scanTelegramArchive(telegramParam, query);
+      return Response.json({ status: "ok", mode: "telegram", ...result, duration_ms: Date.now() - startTime });
     }
 
-    // === SOURCE 2: Telegram Archive (always runs) ===
-    const telegramChannels = ["fireisrael777", "mdaisrael", "uh1221", "maborhz"];
-    const telegramQueries = ["סוללה", "ליתיום", "אופניים חשמליים"];
+    // MODE 1: Gemini knowledge
+    const year = parseInt(url.searchParams.get("year") || "2024");
+    const month = parseInt(url.searchParams.get("month") || "0");
 
-    const telegramArticles: string[] = [];
-    for (const channel of telegramChannels) {
-      for (const q of telegramQueries) {
-        const articles = await searchTelegramArchive(channel, q);
-        telegramArticles.push(...articles);
-      }
+    if (!month || month < 1 || month > 12) {
+      return Response.json({
+        error: "צריך לציין חודש.",
+        examples: [
+          "/api/scan-archive?year=2024&month=6",
+          "/api/scan-archive?telegram=fireisrael777&q=סוללה",
+          "/api/scan-archive?telegram=mdaisrael&q=אופניים",
+          "/api/scan-archive?telegram=uh1221&q=התלקחות",
+        ],
+      }, { status: 400 });
     }
 
-    const seenTg = new Set<string>();
-    uniqueTelegram = telegramArticles.filter(a => {
-      try {
-        const title = JSON.parse(a).title.substring(0, 60);
-        if (seenTg.has(title)) return false;
-        seenTg.add(title);
-        return true;
-      } catch { return false; }
-    });
+    const result = await scanGeminiKnowledge(year, month);
+    return Response.json({ status: "ok", mode: "gemini", ...result, duration_ms: Date.now() - startTime });
 
-    sources.telegram = uniqueTelegram.length;
-
-    if (uniqueTelegram.length > 0) {
-      // Analyze max 20 telegram messages to stay under timeout
-      for (let i = 0; i < Math.min(uniqueTelegram.length, 20); i += 10) {
-        if (i > 0) await new Promise(r => setTimeout(r, 3000));
-        const batch = uniqueTelegram.slice(i, i + 10);
-        const incidents = await analyzeArticles(batch);
-        allIncidents.push(...incidents);
-      }
-    }
-
-    await new Promise(r => setTimeout(r, 2000));
-
-    // === SOURCE 3: Gemini Knowledge (always runs) ===
-    const year = parseInt(dateAfter.split("-")[0]);
-    const monthNames = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"];
-    const geminiDebug: string[] = [];
-
-    if (monthParam) {
-      const m = parseInt(monthParam);
-      const { results, debug: dbg } = await askGeminiArchive(year, monthNames[m - 1]);
-      sources.gemini_knowledge = results.length;
-      allIncidents.push(...results);
-      if (dbg) geminiDebug.push(dbg);
-    } else {
-      const { results: h1, debug: d1 } = await askGeminiArchive(year, "ינואר עד יוני");
-      await new Promise(r => setTimeout(r, 3000)); // 5s delay
-      const { results: h2, debug: d2 } = await askGeminiArchive(year, "יולי עד דצמבר");
-      sources.gemini_knowledge = h1.length + h2.length;
-      allIncidents.push(...h1, ...h2);
-      if (d1) geminiDebug.push(d1);
-      if (d2) geminiDebug.push(d2);
-    }
-
-    // === Dedup all incidents across sources ===
-    const seen = new Set<string>();
-    const uniqueIncidents = allIncidents.filter(inc => {
-      const key = `${inc.incident_date}_${inc.city}_${inc.device_type}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    // === Filter by date range ===
-    const filtered = uniqueIncidents.filter(inc => {
-      return inc.incident_date >= dateAfter && inc.incident_date <= dateBefore;
-    });
-
-    // === Insert to Supabase ===
-    const { inserted, duplicates } = await insertIncidents(filtered);
-
-    return Response.json({
-      status: "ok",
-      period: label,
-      date_range: { from: dateAfter, to: dateBefore },
-      sources,
-      total_found: filtered.length,
-      inserted,
-      duplicates,
-      gemini_debug: geminiDebug,
-      sample_articles: uniqueGoogle.slice(0, 3).concat(uniqueTelegram.slice(0, 3)).map(a => {
-        try { return JSON.parse(a).title; } catch { return a; }
-      }),
-      duration_ms: Date.now() - startTime,
-      timestamp: new Date().toISOString(),
-    });
   } catch (e: any) {
-    return Response.json({
-      status: "error",
-      message: e.message,
-      duration_ms: Date.now() - startTime,
-    }, { status: 500 });
+    return Response.json({ status: "error", message: e.message, duration_ms: Date.now() - startTime }, { status: 500 });
   }
 }
