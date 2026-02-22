@@ -113,19 +113,31 @@ async function askGeminiArchive(year: number, months: string): Promise<{ results
 אם אין אירועים החזר [].`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-        }),
+    let retries = 3;
+    let res: Response | null = null;
+
+    while (retries > 0) {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+          }),
+        }
+      );
+      if (res.status === 429) {
+        retries--;
+        await new Promise(r => setTimeout(r, 10000)); // Wait 10s on rate limit
+        continue;
       }
-    );
-    if (!res.ok) {
-      return { results: [], debug: `gemini_status_${res.status}` };
+      break;
+    }
+
+    if (!res || !res.ok) {
+      return { results: [], debug: `gemini_status_${res?.status || "null"}` };
     }
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -165,18 +177,30 @@ ${articles.join("\n\n")}
 אם אין אירועים רלוונטיים החזר [].`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
-        }),
+    let retries = 3;
+    let res: Response | null = null;
+
+    while (retries > 0) {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
+          }),
+        }
+      );
+      if (res.status === 429) {
+        retries--;
+        await new Promise(r => setTimeout(r, 10000)); // Wait 10s on rate limit
+        continue;
       }
-    );
-    if (!res.ok) return [];
+      break;
+    }
+
+    if (!res || !res.ok) return [];
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
     const jsonMatch = text.match(/\[[\s\S]*\]/);
@@ -330,8 +354,9 @@ export async function GET(request: Request) {
     sources.google_news = uniqueGoogle.length;
 
     if (uniqueGoogle.length > 0) {
-      // Analyze in batches of 10
+      // Analyze in batches of 10 with delay to avoid rate limits
       for (let i = 0; i < uniqueGoogle.length; i += 10) {
+        if (i > 0) await new Promise(r => setTimeout(r, 5000)); // 5s delay between batches
         const batch = uniqueGoogle.slice(i, i + 10);
         const incidents = await analyzeArticles(batch);
         allIncidents.push(...incidents);
@@ -364,11 +389,15 @@ export async function GET(request: Request) {
 
     if (uniqueTelegram.length > 0) {
       for (let i = 0; i < uniqueTelegram.length; i += 10) {
+        if (i > 0) await new Promise(r => setTimeout(r, 5000)); // 5s delay between batches
         const batch = uniqueTelegram.slice(i, i + 10);
         const incidents = await analyzeArticles(batch);
         allIncidents.push(...incidents);
       }
     }
+
+    // Wait before Gemini knowledge calls
+    await new Promise(r => setTimeout(r, 5000));
 
     // === SOURCE 3: Gemini Knowledge (fallback) ===
     const year = parseInt(dateAfter.split("-")[0]);
@@ -383,7 +412,7 @@ export async function GET(request: Request) {
       if (dbg) geminiDebug.push(dbg);
     } else {
       const { results: h1, debug: d1 } = await askGeminiArchive(year, "ינואר עד יוני");
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 5000)); // 5s delay
       const { results: h2, debug: d2 } = await askGeminiArchive(year, "יולי עד דצמבר");
       sources.gemini_knowledge = h1.length + h2.length;
       allIncidents.push(...h1, ...h2);
