@@ -130,7 +130,7 @@ async function askGeminiArchive(year: number, months: string): Promise<{ results
       );
       if (res.status === 429) {
         retries--;
-        await new Promise(r => setTimeout(r, 10000)); // Wait 10s on rate limit
+        await new Promise(r => setTimeout(r, 6000)); // Wait 10s on rate limit
         continue;
       }
       break;
@@ -194,7 +194,7 @@ ${articles.join("\n\n")}
       );
       if (res.status === 429) {
         retries--;
-        await new Promise(r => setTimeout(r, 10000)); // Wait 10s on rate limit
+        await new Promise(r => setTimeout(r, 6000)); // Wait 10s on rate limit
         continue;
       }
       break;
@@ -298,6 +298,7 @@ export async function GET(request: Request) {
   const monthParam = url.searchParams.get("month");
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
+  const mode = url.searchParams.get("mode") || "fast"; // fast=gemini only, full=all sources
 
   let dateAfter: string;
   let dateBefore: string;
@@ -324,82 +325,84 @@ export async function GET(request: Request) {
 
   const sources = { google_news: 0, telegram: 0, gemini_knowledge: 0 };
   const allIncidents: any[] = [];
+  let uniqueGoogle: string[] = [];
+  let uniqueTelegram: string[] = [];
 
   try {
-    // === SOURCE 1: Google News Archive ===
-    const googleQueries = [
-      "שריפה+סוללת+ליתיום",
-      "התלקחות+אופניים+חשמליים",
-      "פיצוץ+סוללה+קורקינט",
-      "שריפה+רכב+חשמלי+סוללה",
-      "סוללה+בוערת+דירה",
-    ];
+    // === SOURCE 1: Google News Archive (only in mode=full) ===
+    if (mode === "full") {
+      const googleQueries = [
+        "שריפה+סוללת+ליתיום",
+        "התלקחות+אופניים+חשמליים",
+        "פיצוץ+סוללה+קורקינט",
+      ];
 
-    const googleArticles: string[] = [];
-    for (const q of googleQueries) {
-      const articles = await searchGoogleNewsArchive(q, dateAfter, dateBefore);
-      googleArticles.push(...articles);
-      await new Promise(r => setTimeout(r, 300)); // Rate limit
-    }
-
-    // Dedup google articles
-    const seenTitles = new Set<string>();
-    const uniqueGoogle = googleArticles.filter(a => {
-      const title = JSON.parse(a).title.substring(0, 50);
-      if (seenTitles.has(title)) return false;
-      seenTitles.add(title);
-      return true;
-    });
-
-    sources.google_news = uniqueGoogle.length;
-
-    if (uniqueGoogle.length > 0) {
-      // Analyze in batches of 10 with delay to avoid rate limits
-      for (let i = 0; i < uniqueGoogle.length; i += 10) {
-        if (i > 0) await new Promise(r => setTimeout(r, 5000)); // 5s delay between batches
-        const batch = uniqueGoogle.slice(i, i + 10);
-        const incidents = await analyzeArticles(batch);
-        allIncidents.push(...incidents);
+      const googleArticles: string[] = [];
+      for (const q of googleQueries) {
+        const articles = await searchGoogleNewsArchive(q, dateAfter, dateBefore);
+        googleArticles.push(...articles);
+        await new Promise(r => setTimeout(r, 300));
       }
+
+      const seenTitles = new Set<string>();
+      uniqueGoogle = googleArticles.filter(a => {
+        try {
+          const title = JSON.parse(a).title.substring(0, 50);
+          if (seenTitles.has(title)) return false;
+          seenTitles.add(title);
+          return true;
+        } catch { return false; }
+      });
+
+      sources.google_news = uniqueGoogle.length;
+
+      if (uniqueGoogle.length > 0) {
+        for (let i = 0; i < Math.min(uniqueGoogle.length, 10); i += 10) {
+          const batch = uniqueGoogle.slice(i, i + 10);
+          const incidents = await analyzeArticles(batch);
+          allIncidents.push(...incidents);
+        }
+      }
+      await new Promise(r => setTimeout(r, 3000));
     }
 
-    // === SOURCE 2: Telegram Archive ===
+    // === SOURCE 2: Telegram Archive (always runs) ===
     const telegramChannels = ["fireisrael777", "mdaisrael", "uh1221", "maborhz"];
-    const telegramQueries = ["סוללה", "ליתיום", "אופניים חשמליים", "קורקינט", "התלקחות"];
+    const telegramQueries = ["סוללה", "ליתיום", "אופניים חשמליים"];
 
     const telegramArticles: string[] = [];
     for (const channel of telegramChannels) {
       for (const q of telegramQueries) {
         const articles = await searchTelegramArchive(channel, q);
         telegramArticles.push(...articles);
-        await new Promise(r => setTimeout(r, 200));
       }
     }
 
-    // Dedup telegram
     const seenTg = new Set<string>();
-    const uniqueTelegram = telegramArticles.filter(a => {
-      const title = JSON.parse(a).title.substring(0, 60);
-      if (seenTg.has(title)) return false;
-      seenTg.add(title);
-      return true;
+    uniqueTelegram = telegramArticles.filter(a => {
+      try {
+        const title = JSON.parse(a).title.substring(0, 60);
+        if (seenTg.has(title)) return false;
+        seenTg.add(title);
+        return true;
+      } catch { return false; }
     });
 
     sources.telegram = uniqueTelegram.length;
 
     if (uniqueTelegram.length > 0) {
-      for (let i = 0; i < uniqueTelegram.length; i += 10) {
-        if (i > 0) await new Promise(r => setTimeout(r, 5000)); // 5s delay between batches
+      // Analyze max 20 telegram messages to stay under timeout
+      for (let i = 0; i < Math.min(uniqueTelegram.length, 20); i += 10) {
+        if (i > 0) await new Promise(r => setTimeout(r, 3000));
         const batch = uniqueTelegram.slice(i, i + 10);
         const incidents = await analyzeArticles(batch);
         allIncidents.push(...incidents);
       }
     }
 
-    // Wait before Gemini knowledge calls
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 2000));
 
-    // === SOURCE 3: Gemini Knowledge (fallback) ===
+    // === SOURCE 3: Gemini Knowledge (always runs) ===
     const year = parseInt(dateAfter.split("-")[0]);
     const monthNames = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"];
     const geminiDebug: string[] = [];
@@ -412,7 +415,7 @@ export async function GET(request: Request) {
       if (dbg) geminiDebug.push(dbg);
     } else {
       const { results: h1, debug: d1 } = await askGeminiArchive(year, "ינואר עד יוני");
-      await new Promise(r => setTimeout(r, 5000)); // 5s delay
+      await new Promise(r => setTimeout(r, 3000)); // 5s delay
       const { results: h2, debug: d2 } = await askGeminiArchive(year, "יולי עד דצמבר");
       sources.gemini_knowledge = h1.length + h2.length;
       allIncidents.push(...h1, ...h2);
