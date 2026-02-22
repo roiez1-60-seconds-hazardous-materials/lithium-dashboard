@@ -1,7 +1,7 @@
 // app/api/scan-archive-all/route.ts
-// Returns an HTML page that auto-runs all archive scans sequentially
+// Auto-runner: Gemini knowledge scan for all months
 // Usage: /api/scan-archive-all
-// Or:    /api/scan-archive-all?from=2023&to=2025
+//        /api/scan-archive-all?from=2023&to=2025
 
 export const runtime = "edge";
 
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>סורק ארכיון אוטומטי</title>
+  <title>סורק ארכיון — Gemini</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 20px; }
@@ -35,29 +35,29 @@ export async function GET(request: Request) {
     .progress-bar { height: 8px; background: linear-gradient(90deg, #ff6b35, #ff8f65); border-radius: 6px; transition: width 0.3s; }
     .current { background: #1a1a1a; border-radius: 10px; padding: 12px; margin-bottom: 16px; font-size: 0.95em; }
     .current .label { color: #888; font-size: 0.8em; }
-    .log { background: #111; border-radius: 10px; padding: 12px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 0.8em; line-height: 1.8; }
+    .log { background: #111; border-radius: 10px; padding: 12px; max-height: 500px; overflow-y: auto; font-family: monospace; font-size: 0.8em; line-height: 1.8; }
     .log-ok { color: #4caf50; }
-    .log-warn { color: #ff9800; }
+    .log-found { color: #ff9800; }
     .log-err { color: #f44336; }
     .log-info { color: #64b5f6; }
   </style>
 </head>
 <body>
-  <h1>🔋 סורק ארכיון אוטומטי</h1>
-  <p class="subtitle">Google News + טלגרם | ${fromYear}-${toYear}</p>
+  <h1>🔋 סורק ארכיון — Gemini</h1>
+  <p class="subtitle">סריקת ידע Gemini | ${fromYear}—${toYear}</p>
 
   <div class="controls">
-    <button id="startBtn" onclick="startScan()">▶ התחל סריקה</button>
-    <button id="stopBtn" onclick="stopScan()">⏹ עצור</button>
+    <button id="startBtn" onclick="startScan()">&#9654; התחל סריקה</button>
+    <button id="stopBtn" onclick="stopScan()">&#9632; עצור</button>
   </div>
 
   <div class="progress"><div class="progress-bar" id="progressBar" style="width:0%"></div></div>
 
   <div class="stats">
-    <div class="stat"><div class="stat-num" id="totalArticles">0</div><div class="stat-label">כתבות נמצאו</div></div>
     <div class="stat"><div class="stat-num" id="totalFound">0</div><div class="stat-label">אירועים זוהו</div></div>
     <div class="stat"><div class="stat-num" id="totalInserted">0</div><div class="stat-label">נוספו ל-DB</div></div>
     <div class="stat"><div class="stat-num" id="totalDups">0</div><div class="stat-label">כפילויות</div></div>
+    <div class="stat"><div class="stat-num" id="totalErrors">0</div><div class="stat-label">שגיאות</div></div>
   </div>
 
   <div class="current">
@@ -69,123 +69,89 @@ export async function GET(request: Request) {
 
   <script>
     let stopped = false;
-    let stats = { articles: 0, found: 0, inserted: 0, dups: 0 };
+    let stats = { found: 0, inserted: 0, dups: 0, errors: 0 };
 
-    // Build task list
+    // Build task list — just Gemini for each month
     const tasks = [];
-
-    // 1. Google News for each month
     for (let year = ${fromYear}; year <= ${toYear}; year++) {
       const maxMonth = (year === ${toYear}) ? ${toMonth} : 12;
       for (let month = 1; month <= maxMonth; month++) {
         tasks.push({
-          label: "📰 Google News " + year + "/" + String(month).padStart(2,"0"),
-          url: "/api/scan-archive?year=" + year + "&month=" + month + "&mode=news"
+          label: year + "/" + String(month).padStart(2, "0"),
+          url: "/api/scan-archive?year=" + year + "&month=" + month
         });
       }
     }
 
-    // 2. Gemini knowledge for each month (best source!)
-    for (let year = ${fromYear}; year <= ${toYear}; year++) {
-      const maxMonth = (year === ${toYear}) ? ${toMonth} : 12;
-      for (let month = 1; month <= maxMonth; month++) {
-        tasks.push({
-          label: "Gemini " + year + "/" + String(month).padStart(2,"0"),
-          url: "/api/scan-archive?year=" + year + "&month=" + month + "&mode=gemini"
-        });
-      }
-    }
-
-    // 3. Telegram queries
-    const tgQueries = [
-      { channel: "uh1221", q: "סוללה" },
-      { channel: "uh1221", q: "התלקחות" },
-      { channel: "uh1221", q: "שריפה" },
-      { channel: "uh1221", q: "ליתיום" },
-      { channel: "mdaisrael", q: "סוללה" },
-      { channel: "mdaisrael", q: "שריפה" },
-      { channel: "mdaisrael", q: "כוויות" },
-      { channel: "newslocker", q: "סוללה" },
-      { channel: "newslocker", q: "התלקחות" },
-      { channel: "newslocker", q: "ליתיום" },
-      { channel: "kann11news", q: "סוללה" },
-      { channel: "kann11news", q: "התלקחות אופניים" },
-    ];
-
-    tgQueries.forEach(tq => {
-      tasks.push({
-        label: "📱 טלגרם @" + tq.channel + " — " + tq.q,
-        url: "/api/scan-archive?telegram=" + tq.channel + "&q=" + encodeURIComponent(tq.q)
-      });
-    });
-
-    function log(msg, cls = "") {
-      const el = document.getElementById("log");
-      const time = new Date().toLocaleTimeString("he-IL");
-      el.innerHTML += '<div class="' + cls + '">[' + time + '] ' + msg + '</div>';
+    function log(msg, cls) {
+      var el = document.getElementById("log");
+      var time = new Date().toLocaleTimeString("he-IL");
+      el.innerHTML += '<div class="' + (cls || '') + '">[' + time + '] ' + msg + '</div>';
       el.scrollTop = el.scrollHeight;
     }
 
     function updateStats() {
-      document.getElementById("totalArticles").textContent = stats.articles;
       document.getElementById("totalFound").textContent = stats.found;
       document.getElementById("totalInserted").textContent = stats.inserted;
       document.getElementById("totalDups").textContent = stats.dups;
+      document.getElementById("totalErrors").textContent = stats.errors;
     }
 
     async function runTask(task, index) {
-      document.getElementById("status").textContent = task.label + " (" + (index+1) + "/" + tasks.length + ")";
-      document.getElementById("progressBar").style.width = ((index+1) / tasks.length * 100) + "%";
+      document.getElementById("status").textContent = task.label + " (" + (index + 1) + "/" + tasks.length + ")";
+      document.getElementById("progressBar").style.width = ((index + 1) / tasks.length * 100) + "%";
 
       try {
-        const res = await fetch(task.url);
-        const data = await res.json();
+        var res = await fetch(task.url);
+        var data = await res.json();
 
         if (data.status === "ok") {
-          const articles = data.articles_found || data.messages_found || 0;
-          const found = data.found || 0;
-          const inserted = data.inserted || 0;
-          const dups = data.duplicates || 0;
+          var found = data.found || 0;
+          var inserted = data.inserted || 0;
+          var dups = data.duplicates || 0;
 
-          stats.articles += articles;
           stats.found += found;
           stats.inserted += inserted;
           stats.dups += dups;
           updateStats();
 
           if (inserted > 0) {
-            log(task.label + " → ✅ " + inserted + " נוספו! (מתוך " + found + " אירועים, " + articles + " כתבות)", "log-ok");
+            log(task.label + " — " + inserted + " נוספו! (" + found + " אירועים, " + dups + " כפילויות)", "log-ok");
           } else if (found > 0) {
-            log(task.label + " → " + found + " אירועים (כפילויות: " + dups + ")", "log-warn");
+            log(task.label + " — " + found + " אירועים (" + dups + " כפילויות)", "log-found");
           } else {
-            log(task.label + " → " + articles + " כתבות, 0 אירועים", "log-info");
+            log(task.label + " — 0 אירועים", "log-info");
           }
         } else {
-          log(task.label + " → שגיאה: " + (data.message || data.error || "unknown"), "log-err");
+          stats.errors++;
+          updateStats();
+          log(task.label + " — שגיאה: " + (data.message || "unknown"), "log-err");
         }
       } catch (e) {
-        log(task.label + " → שגיאה: " + e.message, "log-err");
+        stats.errors++;
+        updateStats();
+        log(task.label + " — שגיאה: " + e.message, "log-err");
       }
     }
 
     async function startScan() {
       stopped = false;
       document.getElementById("startBtn").disabled = true;
-      stats = { articles: 0, found: 0, inserted: 0, dups: 0 };
+      stats = { found: 0, inserted: 0, dups: 0, errors: 0 };
       updateStats();
       document.getElementById("log").innerHTML = "";
-      log("🚀 מתחיל סריקה — " + tasks.length + " משימות", "log-info");
+      log("מתחיל סריקה — " + tasks.length + " חודשים", "log-info");
 
-      for (let i = 0; i < tasks.length; i++) {
-        if (stopped) { log('נעצר', 'log-warn'); break; }
+      for (var i = 0; i < tasks.length; i++) {
+        if (stopped) { log("נעצר", "log-err"); break; }
         await runTask(tasks[i], i);
-        // Small delay to avoid rate limits
-        if (!stopped) await new Promise(r => setTimeout(r, 8000));
+        // 5 second delay between months (Gemini 15 RPM = 1 per 4 sec)
+        if (!stopped && i < tasks.length - 1) await new Promise(function(r) { setTimeout(r, 5000); });
       }
 
       document.getElementById("status").textContent = stopped ? "נעצר" : "הסתיים!";
       document.getElementById("startBtn").disabled = false;
-      log('סיכום: ' + stats.found + ' אירועים, ' + stats.inserted + ' נוספו, ' + stats.dups + ' כפילויות', 'log-ok');
+      log("סיכום: " + stats.found + " אירועים, " + stats.inserted + " נוספו, " + stats.dups + " כפילויות, " + stats.errors + " שגיאות", "log-ok");
     }
 
     function stopScan() { stopped = true; }
