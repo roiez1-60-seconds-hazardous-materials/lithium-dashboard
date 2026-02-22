@@ -11,6 +11,7 @@ export const maxDuration = 60;
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
 const GROQ_KEY = process.env.GROQ_API_KEY!;
+const TG_PROXY = process.env.TG_PROXY_URL || "";
 
 const MONTH_NAMES = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
 
@@ -149,9 +150,11 @@ async function scanKnowledge(year: number, month: number) {
 // MODE 2: Telegram Archive — one channel + query
 // ============================================
 async function scanTelegram(channel: string, query: string) {
-  const tgUrl = `https://t.me/s/${channel}?q=${encodeURIComponent(query)}`;
+  const tgUrl = TG_PROXY
+    ? `${TG_PROXY}?channel=${channel}&q=${encodeURIComponent(query)}`
+    : `https://t.me/s/${channel}?q=${encodeURIComponent(query)}`;
   const tgRes = await fetch(tgUrl, {
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(15000),
     headers: { "User-Agent": "Mozilla/5.0" },
   });
   if (!tgRes.ok) throw new Error(`telegram_${tgRes.status}`);
@@ -235,16 +238,88 @@ export async function GET(request: Request) {
         error: "צריך לציין חודש",
         usage: {
           knowledge: "/api/scan-archive?year=2024&month=6",
+          news: "/api/scan-archive?year=2024&month=6&mode=news",
           telegram_examples: [
             "/api/scan-archive?telegram=fireisrael777&q=סוללה",
-            "/api/scan-archive?telegram=fireisrael777&q=קורקינט",
-            "/api/scan-archive?telegram=mdaisrael&q=אופניים",
-            "/api/scan-archive?telegram=mdaisrael&q=התלקחות",
-            "/api/scan-archive?telegram=uh1221&q=סוללה",
-            "/api/scan-archive?telegram=uh1221&q=שריפה",
           ],
         },
       }, { status: 400 });
+    }
+
+    const mode = url.searchParams.get("mode");
+
+    // MODE 3: Google News archive + Groq analysis
+    if (mode === "news") {
+      const monthStr = String(month).padStart(2, "0");
+      const dateAfter = `${year}-${monthStr}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const dateBefore = `${year}-${monthStr}-${lastDay}`;
+
+      const queries = [
+        "שריפה+סוללת+ליתיום",
+        "התלקחות+אופניים+חשמליים",
+        "פיצוץ+סוללה+קורקינט",
+      ];
+
+      const allArticles: string[] = [];
+      for (const q of queries) {
+        try {
+          const fullQuery = `${q}+after:${dateAfter}+before:${dateBefore}`;
+          const gUrl = `https://news.google.com/rss/search?q=${fullQuery}&hl=he&gl=IL&ceid=IL:he`;
+          const res = await fetch(gUrl, { signal: AbortSignal.timeout(8000) });
+          if (!res.ok) continue;
+          const text = await res.text();
+
+          const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+          let m;
+          while ((m = itemRegex.exec(text)) !== null) {
+            const title = m[1].match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/)?.[1] || "";
+            const pubDate = m[1].match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || "";
+            if (title.length > 10) allArticles.push(`(${pubDate}) ${title}`);
+          }
+        } catch {}
+      }
+
+      // Dedup
+      const seen = new Set<string>();
+      const unique = allArticles.filter(a => {
+        const key = a.substring(0, 60);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      if (unique.length === 0) {
+        return Response.json({
+          status: "ok", mode: "news", period: `${MONTH_NAMES[month-1]} ${year}`,
+          articles_found: 0, found: 0, inserted: 0, duplicates: 0,
+          duration_ms: Date.now() - startTime,
+        });
+      }
+
+      // Analyze with Groq (max 20 articles)
+      const articleText = unique.slice(0, 20).join("\n");
+      const prompt = `נתח את הכותרות הבאות מחדשות ישראל ומצא אירועי שריפה/התלקחות/פיצוץ של סוללות ליתיום בלבד.
+לא לכלול: תאונות דרכים, כתבות כלליות על בטיחות, חקיקה.
+מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
+
+החזר JSON array בלבד:
+[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
+אם אין — החזר []
+
+הכותרות:
+${articleText}`;
+
+      const groqText = await callGroq(prompt);
+      const incidents = parseLlmJson(groqText);
+      const { inserted, duplicates } = await processIncidents(incidents, "archive_news_groq");
+
+      return Response.json({
+        status: "ok", mode: "news", period: `${MONTH_NAMES[month-1]} ${year}`,
+        articles_found: unique.length, found: incidents.length, inserted, duplicates,
+        sample_articles: unique.slice(0, 5),
+        duration_ms: Date.now() - startTime,
+      });
     }
 
     const result = await scanKnowledge(year, month);
