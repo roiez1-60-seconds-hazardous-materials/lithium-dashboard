@@ -96,7 +96,7 @@ async function searchTelegramArchive(channel: string, query: string): Promise<st
 // ============================================
 // Gemini knowledge-based search (fallback)
 // ============================================
-async function askGeminiArchive(year: number, months: string): Promise<any[]> {
+async function askGeminiArchive(year: number, months: string): Promise<{ results: any[]; debug?: string }> {
   const prompt = `רשום אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודשים ${months} ${year}.
 
 כללים:
@@ -124,15 +124,21 @@ async function askGeminiArchive(year: number, months: string): Promise<any[]> {
         }),
       }
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      return { results: [], debug: `gemini_status_${res.status}` };
+    }
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!text) return { results: [], debug: "gemini_empty_response" };
+
     const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
     const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return [];
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    return [];
+    if (!jsonMatch) return { results: [], debug: `gemini_no_json: ${cleaned.substring(0, 200)}` };
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    return { results: Array.isArray(parsed) ? parsed : [], debug: `gemini_ok_${parsed.length}` };
+  } catch (e: any) {
+    return { results: [], debug: `gemini_error: ${e.message}` };
   }
 }
 
@@ -367,19 +373,22 @@ export async function GET(request: Request) {
     // === SOURCE 3: Gemini Knowledge (fallback) ===
     const year = parseInt(dateAfter.split("-")[0]);
     const monthNames = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"];
+    const geminiDebug: string[] = [];
 
     if (monthParam) {
       const m = parseInt(monthParam);
-      const geminiResults = await askGeminiArchive(year, monthNames[m - 1]);
-      sources.gemini_knowledge = geminiResults.length;
-      allIncidents.push(...geminiResults);
+      const { results, debug: dbg } = await askGeminiArchive(year, monthNames[m - 1]);
+      sources.gemini_knowledge = results.length;
+      allIncidents.push(...results);
+      if (dbg) geminiDebug.push(dbg);
     } else {
-      // Split to 2 halves to avoid Gemini output limits
-      const h1 = await askGeminiArchive(year, "ינואר עד יוני");
+      const { results: h1, debug: d1 } = await askGeminiArchive(year, "ינואר עד יוני");
       await new Promise(r => setTimeout(r, 500));
-      const h2 = await askGeminiArchive(year, "יולי עד דצמבר");
+      const { results: h2, debug: d2 } = await askGeminiArchive(year, "יולי עד דצמבר");
       sources.gemini_knowledge = h1.length + h2.length;
       allIncidents.push(...h1, ...h2);
+      if (d1) geminiDebug.push(d1);
+      if (d2) geminiDebug.push(d2);
     }
 
     // === Dedup all incidents across sources ===
@@ -407,6 +416,10 @@ export async function GET(request: Request) {
       total_found: filtered.length,
       inserted,
       duplicates,
+      gemini_debug: geminiDebug,
+      sample_articles: uniqueGoogle.slice(0, 3).concat(uniqueTelegram.slice(0, 3)).map(a => {
+        try { return JSON.parse(a).title; } catch { return a; }
+      }),
       duration_ms: Date.now() - startTime,
       timestamp: new Date().toISOString(),
     });
