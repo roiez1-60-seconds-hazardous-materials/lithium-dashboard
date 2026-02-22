@@ -1,16 +1,53 @@
 // app/api/scan-archive/route.ts
-// V5 — Two modes:
-// Default:  Gemini knowledge scan per month  → ?year=2024&month=6
-// Telegram: Scan one telegram channel        → ?telegram=fireisrael777&q=סוללה
+// V6 — Uses Groq (Llama) for archive scanning — 14,400 free requests/day
+// Gemini stays for the daily scanner, Groq handles archive bulk work
+// Usage:
+//   /api/scan-archive?year=2024&month=6          → Groq knowledge
+//   /api/scan-archive?telegram=fireisrael777&q=סוללה  → Telegram + Groq analysis
 
 export const runtime = "edge";
 export const maxDuration = 60;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
-const GEMINI_KEY = process.env.GEMINI_API_KEY!;
+const GROQ_KEY = process.env.GROQ_API_KEY!;
 
 const MONTH_NAMES = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
+
+// ============================================
+// Call Groq (Llama) — OpenAI-compatible API
+// ============================================
+async function callGroq(prompt: string): Promise<string> {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${GROQ_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: "אתה מנתח נתוני שריפות סוללות ליתיום בישראל. תמיד החזר JSON array בלבד, בלי markdown, בלי הסברים." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.15,
+      max_tokens: 4096,
+    }),
+  });
+  if (!res.ok) throw new Error(`groq_${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+// ============================================
+// Parse JSON from LLM response
+// ============================================
+function parseLlmJson(text: string): any[] {
+  const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  const match = cleaned.match(/\[[\s\S]*\]/);
+  if (!match) return [];
+  try { return JSON.parse(match[0]); } catch { return []; }
+}
 
 // ============================================
 // Duplicate check
@@ -72,39 +109,22 @@ async function insertIncident(inc: any, dataSource: string): Promise<boolean> {
 }
 
 // ============================================
-// Call Gemini
+// Process incidents — dedup & insert
 // ============================================
-async function callGemini(prompt: string): Promise<string> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.15, maxOutputTokens: 8192 },
-      }),
-    }
-  );
-  if (!res.ok) throw new Error(`gemini_${res.status}`);
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+async function processIncidents(incidents: any[], dataSource: string) {
+  let inserted = 0, duplicates = 0;
+  for (const inc of incidents) {
+    if (!inc.incident_date || !inc.city || !inc.device_type) continue;
+    if (await checkDuplicate(inc)) { duplicates++; continue; }
+    if (await insertIncident(inc, dataSource)) inserted++;
+  }
+  return { inserted, duplicates };
 }
 
 // ============================================
-// Parse JSON from Gemini response
+// MODE 1: LLM Knowledge — one month
 // ============================================
-function parseGeminiJson(text: string): any[] {
-  const cleaned = text.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-  const match = cleaned.match(/\[[\s\S]*\]/);
-  if (!match) return [];
-  try { return JSON.parse(match[0]); } catch { return []; }
-}
-
-// ============================================
-// MODE 1: Gemini Knowledge — one month
-// ============================================
-async function scanGeminiKnowledge(year: number, month: number) {
+async function scanKnowledge(year: number, month: number) {
   const monthName = MONTH_NAMES[month - 1];
 
   const prompt = `רשום כל אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום יון שקרו בישראל בחודש ${monthName} ${year}.
@@ -114,28 +134,21 @@ async function scanGeminiKnowledge(year: number, month: number) {
 רק אירועים אמיתיים שדווחו בתקשורת הישראלית!
 מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
 
-החזר JSON array בלבד. בלי markdown בלי backticks:
+החזר JSON array בלבד:
 [{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
 אם אין — החזר []`;
 
-  const text = await callGemini(prompt);
-  const incidents = parseGeminiJson(text);
-
-  let inserted = 0, duplicates = 0;
-  for (const inc of incidents) {
-    if (!inc.incident_date || !inc.city || !inc.device_type) continue;
-    if (await checkDuplicate(inc)) { duplicates++; continue; }
-    if (await insertIncident(inc, "archive_gemini")) inserted++;
-  }
+  const text = await callGroq(prompt);
+  const incidents = parseLlmJson(text);
+  const { inserted, duplicates } = await processIncidents(incidents, "archive_groq");
 
   return { period: `${monthName} ${year}`, found: incidents.length, inserted, duplicates };
 }
 
 // ============================================
-// MODE 2: Telegram Archive — one channel, one query
+// MODE 2: Telegram Archive — one channel + query
 // ============================================
-async function scanTelegramArchive(channel: string, query: string) {
-  // Fetch telegram search results
+async function scanTelegram(channel: string, query: string) {
   const tgUrl = `https://t.me/s/${channel}?q=${encodeURIComponent(query)}`;
   const tgRes = await fetch(tgUrl, {
     signal: AbortSignal.timeout(10000),
@@ -158,7 +171,7 @@ async function scanTelegramArchive(channel: string, query: string) {
   while ((mm = msgRegex.exec(html)) !== null) {
     const text = mm[1].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').trim();
     if (text.length > 20) {
-      messages.push({ text: text.substring(0, 500), date: dates[idx] || "" });
+      messages.push({ text: text.substring(0, 400), date: dates[idx] || "" });
     }
     idx++;
   }
@@ -167,68 +180,75 @@ async function scanTelegramArchive(channel: string, query: string) {
     return { channel, query, messages_found: 0, found: 0, inserted: 0, duplicates: 0 };
   }
 
-  // Send to Gemini for analysis (one call for all messages)
-  const msgText = messages.map((m, i) => `[${i + 1}] (${m.date}) ${m.text}`).join("\n\n");
+  // Analyze with Groq
+  const msgText = messages.slice(0, 30).map((m, i) => `[${i + 1}] (${m.date}) ${m.text}`).join("\n\n");
 
-  const prompt = `נתח את ההודעות הבאות מערוץ טלגרם ${channel} ומצא אירועי שריפה/התלקחות/פיצוץ של סוללות ליתיום בלבד.
-
-לא לכלול: תאונות דרכים רגילות, פינוי ללא שריפת סוללה, כתבות כלליות.
+  const prompt = `נתח את ההודעות הבאות מערוץ טלגרם @${channel}.
+מצא רק אירועי שריפה/התלקחות/פיצוץ של סוללות ליתיום.
+לא לכלול: תאונות דרכים רגילות, פינוי רגיל, כתבות כלליות.
 מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
 
-החזר JSON array בלבד. בלי markdown בלי backticks:
+החזר JSON array בלבד:
 [{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"telegram @${channel}","source_url":""}]
-אם אין אירועים רלוונטיים — החזר []
+אם אין — החזר []
 
 ההודעות:
 ${msgText}`;
 
-  const text = await callGemini(prompt);
-  const incidents = parseGeminiJson(text);
-
-  let inserted = 0, duplicates = 0;
-  for (const inc of incidents) {
-    if (!inc.incident_date || !inc.city || !inc.device_type) continue;
-    if (await checkDuplicate(inc)) { duplicates++; continue; }
-    if (await insertIncident(inc, `archive_telegram_${channel}`)) inserted++;
-  }
+  const text = await callGroq(prompt);
+  const incidents = parseLlmJson(text);
+  const { inserted, duplicates } = await processIncidents(incidents, `archive_tg_${channel}`);
 
   return { channel, query, messages_found: messages.length, found: incidents.length, inserted, duplicates };
 }
 
 // ============================================
-// MAIN HANDLER
+// MAIN
 // ============================================
 export async function GET(request: Request) {
   const startTime = Date.now();
   const url = new URL(request.url);
 
   try {
-    // MODE 2: Telegram archive
+    // Check if Groq key exists
+    if (!GROQ_KEY) {
+      return Response.json({
+        error: "חסר GROQ_API_KEY. הוסף בהגדרות Vercel → Environment Variables.",
+        signup: "https://console.groq.com",
+      }, { status: 500 });
+    }
+
+    // MODE 2: Telegram
     const telegramParam = url.searchParams.get("telegram");
     if (telegramParam) {
       const query = url.searchParams.get("q") || "סוללה";
-      const result = await scanTelegramArchive(telegramParam, query);
+      const result = await scanTelegram(telegramParam, query);
       return Response.json({ status: "ok", mode: "telegram", ...result, duration_ms: Date.now() - startTime });
     }
 
-    // MODE 1: Gemini knowledge
+    // MODE 1: Knowledge
     const year = parseInt(url.searchParams.get("year") || "2024");
     const month = parseInt(url.searchParams.get("month") || "0");
 
     if (!month || month < 1 || month > 12) {
       return Response.json({
-        error: "צריך לציין חודש.",
-        examples: [
-          "/api/scan-archive?year=2024&month=6",
-          "/api/scan-archive?telegram=fireisrael777&q=סוללה",
-          "/api/scan-archive?telegram=mdaisrael&q=אופניים",
-          "/api/scan-archive?telegram=uh1221&q=התלקחות",
-        ],
+        error: "צריך לציין חודש",
+        usage: {
+          knowledge: "/api/scan-archive?year=2024&month=6",
+          telegram_examples: [
+            "/api/scan-archive?telegram=fireisrael777&q=סוללה",
+            "/api/scan-archive?telegram=fireisrael777&q=קורקינט",
+            "/api/scan-archive?telegram=mdaisrael&q=אופניים",
+            "/api/scan-archive?telegram=mdaisrael&q=התלקחות",
+            "/api/scan-archive?telegram=uh1221&q=סוללה",
+            "/api/scan-archive?telegram=uh1221&q=שריפה",
+          ],
+        },
       }, { status: 400 });
     }
 
-    const result = await scanGeminiKnowledge(year, month);
-    return Response.json({ status: "ok", mode: "gemini", ...result, duration_ms: Date.now() - startTime });
+    const result = await scanKnowledge(year, month);
+    return Response.json({ status: "ok", mode: "knowledge", ...result, duration_ms: Date.now() - startTime });
 
   } catch (e: any) {
     return Response.json({ status: "error", message: e.message, duration_ms: Date.now() - startTime }, { status: 500 });
