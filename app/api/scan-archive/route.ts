@@ -18,26 +18,36 @@ const MONTH_NAMES = ["ינואר","פברואר","מרץ","אפריל","מאי",
 // ============================================
 // Call Groq (Llama) — OpenAI-compatible API
 // ============================================
-async function callGroq(prompt: string): Promise<string> {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: "אתה מנתח נתוני שריפות סוללות ליתיום בישראל. תמיד החזר JSON array בלבד, בלי markdown, בלי הסברים." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.15,
-      max_tokens: 4096,
-    }),
-  });
-  if (!res.ok) throw new Error(`groq_${res.status}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || "";
+async function callGroq(prompt: string, retries = 3): Promise<string> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: "אתה מנתח נתוני שריפות סוללות ליתיום בישראל. תמיד החזר JSON array בלבד, בלי markdown, בלי הסברים." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.15,
+        max_tokens: 4096,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content || "";
+    }
+    if (res.status === 429 && attempt < retries - 1) {
+      // Wait 15 seconds before retry on rate limit
+      await new Promise(r => setTimeout(r, 15000));
+      continue;
+    }
+    throw new Error(`groq_${res.status}`);
+  }
+  throw new Error("groq_max_retries");
 }
 
 // ============================================
