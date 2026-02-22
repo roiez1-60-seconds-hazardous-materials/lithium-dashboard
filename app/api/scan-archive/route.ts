@@ -1,53 +1,65 @@
 // app/api/scan-archive/route.ts
-// V6 — Uses Groq (Llama) for archive scanning — 14,400 free requests/day
-// Gemini stays for the daily scanner, Groq handles archive bulk work
+// V7 — Gemini-only archive scanner
+// One Gemini call per month = fast, accurate, knows Israeli incidents
 // Usage:
-//   /api/scan-archive?year=2024&month=6          → Groq knowledge
-//   /api/scan-archive?telegram=fireisrael777&q=סוללה  → Telegram + Groq analysis
+//   /api/scan-archive?year=2024&month=6              → Gemini knowledge
+//   /api/scan-archive?year=2024&month=6&mode=news    → Google News + Groq fallback
+//   /api/scan-archive?telegram=uh1221&q=סוללה        → Telegram + Groq
 
 export const runtime = "edge";
 export const maxDuration = 60;
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!;
-const GROQ_KEY = process.env.GROQ_API_KEY!;
+const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
+const GROQ_KEY = process.env.GROQ_API_KEY || "";
 const TG_PROXY = process.env.TG_PROXY_URL || "";
 
 const MONTH_NAMES = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
 
 // ============================================
-// Call Groq (Llama) — OpenAI-compatible API
+// Call Gemini
 // ============================================
-async function callGroq(prompt: string, retries = 3): Promise<string> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+async function callGemini(prompt: string): Promise<string> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GROQ_KEY}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [
-          { role: "system", content: "אתה מנתח נתוני שריפות סוללות ליתיום בישראל. תמיד החזר JSON array בלבד, בלי markdown, בלי הסברים." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.15,
-        max_tokens: 4096,
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
       }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content || "";
     }
-    if (res.status === 429 && attempt < retries - 1) {
-      // Wait 15 seconds before retry on rate limit
-      await new Promise(r => setTimeout(r, 15000));
-      continue;
-    }
-    throw new Error(`groq_${res.status}`);
-  }
-  throw new Error("groq_max_retries");
+  );
+  if (!res.ok) throw new Error(`gemini_${res.status}`);
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+// ============================================
+// Call Groq (fallback for Telegram/News)
+// ============================================
+async function callGroq(prompt: string): Promise<string> {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${GROQ_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: "אתה מנתח נתוני שריפות סוללות ליתיום בישראל. תמיד החזר JSON array בלבד, בלי markdown, בלי הסברים." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.15,
+      max_tokens: 4096,
+    }),
+  });
+  if (!res.ok) throw new Error(`groq_${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
 }
 
 // ============================================
@@ -120,44 +132,64 @@ async function insertIncident(inc: any, dataSource: string): Promise<boolean> {
 }
 
 // ============================================
-// Process incidents — dedup & insert
+// Process incidents array — dedup + insert
 // ============================================
-async function processIncidents(incidents: any[], dataSource: string) {
+async function processIncidents(incidents: any[], source: string) {
   let inserted = 0, duplicates = 0;
   for (const inc of incidents) {
     if (!inc.incident_date || !inc.city || !inc.device_type) continue;
     if (await checkDuplicate(inc)) { duplicates++; continue; }
-    if (await insertIncident(inc, dataSource)) inserted++;
+    if (await insertIncident(inc, source)) inserted++;
   }
   return { inserted, duplicates };
 }
 
 // ============================================
-// MODE 1: LLM Knowledge — one month
+// Build the Gemini prompt for a month
 // ============================================
-async function scanKnowledge(year: number, month: number) {
-  const monthName = MONTH_NAMES[month - 1];
+function buildGeminiPrompt(monthName: string, year: number): string {
+  return `אתה חוקר שריפות סוללות ליתיום בישראל. מומחה בנושא.
 
-  const prompt = `רשום כל אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום יון שקרו בישראל בחודש ${monthName} ${year}.
+רשום את כל אירועי שריפה, התלקחות, פיצוץ, דליקה, עשן או בריחה תרמית של סוללות ליתיום שקרו בישראל בחודש ${monthName} ${year}.
 
-כלול: אופניים חשמליים, קורקינטים, רכבים חשמליים, קלנועיות, טלפונים, פאוורבנקים, UPS, מחשבים ניידים.
-לא לכלול: תאונות דרכים רגילות, גניבות, חקיקה, מאמרי דעה.
-רק אירועים אמיתיים שדווחו בתקשורת הישראלית!
-מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
+סוגי אירועים לכלול:
+- אופניים חשמליים (שריפה/התלקחות/פיצוץ בזמן טעינה, נסיעה, חנייה)
+- קורקינט חשמלי (שריפה/התלקחות/פיצוץ)
+- רכב חשמלי (שריפה/התלקחות, כולל טסלה, BYD, וכל יצרן)
+- רכב היברידי / פלאג-אין (שריפה/התלקחות של הסוללה)
+- קלנועית חשמלית (שריפה/התלקחות)
+- אופנוע חשמלי (שריפה/התלקחות)
+- מתקן אגירת אנרגיה / חוות סוללות (שריפה/התלקחות/פיצוץ)
+- פאוורבנק (שריפה/פיצוץ/התלקחות)
+- טלפון נייד / סמארטפון (סוללה התפוצצה/נדלקה)
+- מחשב נייד / טאבלט (סוללה נדלקה)
+- סיגריה אלקטרונית / ויפ (סוללה התפוצצה)
+- UPS / מערכת גיבוי (סוללת ליתיום נדלקה)
+- מטען סוללה (שריפה בזמן טעינה)
+- כלי עבודה חשמליים (סוללת ליתיום נדלקה)
+- רחפן (סוללה נדלקה)
+- כל מכשיר אחר עם סוללת ליתיום
 
-החזר JSON array בלבד:
-[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
-אם אין — החזר []`;
+לא לכלול:
+- תאונות דרכים רגילות (בלי שריפה מהסוללה)
+- גניבות
+- חקיקה, רגולציה, מאמרי דעה
+- כתבות כלליות על סכנות ליתיום
+- אירועים מחוץ לישראל
 
-  const text = await callGroq(prompt);
-  const incidents = parseLlmJson(text);
-  const { inserted, duplicates } = await processIncidents(incidents, "archive_groq");
+מחוזות: צפון, חוף, דן, מרכז, ירושלים, יהודה ושומרון, דרום
 
-  return { period: `${monthName} ${year}`, found: incidents.length, inserted, duplicates };
+חשוב מאוד: רק אירועים אמיתיים וספציפיים שדווחו בתקשורת הישראלית!
+אם אתה לא בטוח לגבי תאריך מדויק, תן את התאריך המשוער.
+
+החזר JSON array בלבד. בלי markdown, בלי backticks, בלי הסברים לפני או אחרי:
+[{"incident_date":"YYYY-MM-DD","city":"שם העיר","district":"מחוז","device_type":"סוג המכשיר","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר של האירוע","source_name":"שם המקור","source_url":""}]
+
+אם אין אירועים בחודש זה — החזר []`;
 }
 
 // ============================================
-// MODE 2: Telegram Archive — one channel + query
+// MODE: Telegram Archive
 // ============================================
 async function scanTelegram(channel: string, query: string) {
   const tgUrl = TG_PROXY
@@ -170,7 +202,6 @@ async function scanTelegram(channel: string, query: string) {
   if (!tgRes.ok) throw new Error(`telegram_${tgRes.status}`);
   const html = await tgRes.text();
 
-  // Extract messages with dates
   const messages: { text: string; date: string }[] = [];
   const msgRegex = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/gi;
   const dateRegex = /<time[^>]*datetime="([^"]*)"[^>]*>/gi;
@@ -193,45 +224,32 @@ async function scanTelegram(channel: string, query: string) {
     return { channel, query, messages_found: 0, found: 0, inserted: 0, duplicates: 0 };
   }
 
-  // Analyze with Groq
-  const msgText = messages.slice(0, 30).map((m, i) => `[${i + 1}] (${m.date}) ${m.text}`).join("\n\n");
-
-  const prompt = `נתח את ההודעות הבאות מערוץ טלגרם @${channel}.
-מצא רק אירועי שריפה/התלקחות/פיצוץ של סוללות ליתיום.
-לא לכלול: תאונות דרכים רגילות, פינוי רגיל, כתבות כלליות.
-מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
-
+  const msgText = messages.map((m, i) => `[${i+1}] (${m.date}) ${m.text}`).join("\n");
+  const prompt = `הודעות מטלגרם ערוץ ${channel}, חיפוש "${query}".
+זהה רק הודעות על שריפה/פיצוץ/התלקחות של סוללות ליתיום (אופניים חשמליים, קורקינט, רכב חשמלי/היברידי, קלנועית, מתקן אגירה, פאוורבנק, טלפון, וכו).
+לא לכלול: תאונות רגילות, פציעות ללא שריפת סוללה, כתבות כלליות.
 החזר JSON array בלבד:
-[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"telegram @${channel}","source_url":""}]
-אם אין — החזר []
+[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"חומרה","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור","source_name":"טלגרם ${channel}","source_url":""}]
+אם אין — []
 
 ההודעות:
 ${msgText}`;
 
-  const text = await callGroq(prompt);
-  const incidents = parseLlmJson(text);
-  const { inserted, duplicates } = await processIncidents(incidents, `archive_tg_${channel}`);
-
+  const llmText = GROQ_KEY ? await callGroq(prompt) : await callGemini(prompt);
+  const incidents = parseLlmJson(llmText);
+  const { inserted, duplicates } = await processIncidents(incidents, `telegram_${channel}`);
   return { channel, query, messages_found: messages.length, found: incidents.length, inserted, duplicates };
 }
 
 // ============================================
-// MAIN
+// MAIN HANDLER
 // ============================================
 export async function GET(request: Request) {
   const startTime = Date.now();
   const url = new URL(request.url);
 
   try {
-    // Check if Groq key exists
-    if (!GROQ_KEY) {
-      return Response.json({
-        error: "חסר GROQ_API_KEY. הוסף בהגדרות Vercel → Environment Variables.",
-        signup: "https://console.groq.com",
-      }, { status: 500 });
-    }
-
-    // MODE 2: Telegram
+    // MODE: Telegram
     const telegramParam = url.searchParams.get("telegram");
     if (telegramParam) {
       const query = url.searchParams.get("q") || "סוללה";
@@ -239,190 +257,38 @@ export async function GET(request: Request) {
       return Response.json({ status: "ok", mode: "telegram", ...result, duration_ms: Date.now() - startTime });
     }
 
-    // MODE 1: Knowledge
+    // Parse year/month
     const year = parseInt(url.searchParams.get("year") || "2024");
     const month = parseInt(url.searchParams.get("month") || "0");
 
     if (!month || month < 1 || month > 12) {
       return Response.json({
-        error: "צריך לציין חודש",
-        usage: {
-          knowledge: "/api/scan-archive?year=2024&month=6",
-          news: "/api/scan-archive?year=2024&month=6&mode=news",
-          telegram_examples: [
-            "/api/scan-archive?telegram=fireisrael777&q=סוללה",
-          ],
-        },
+        error: "specify month",
+        usage: "/api/scan-archive?year=2024&month=6",
       }, { status: 400 });
     }
 
-    const mode = url.searchParams.get("mode");
+    const monthName = MONTH_NAMES[month - 1];
 
-    // MODE 3: Google News archive + Groq analysis
-    if (mode === "news") {
-      const monthStr = String(month).padStart(2, "0");
-      const dateAfter = `${year}-${monthStr}-01`;
-      const lastDay = new Date(year, month, 0).getDate();
-      const dateBefore = `${year}-${monthStr}-${lastDay}`;
-
-      const queries = [
-        // סוללות ליתיום - כללי
-        "סוללת+ליתיום+שריפה+OR+התלקחות+OR+פיצוץ",
-        "סוללות+ליתיום+שריפה+OR+דליקה+OR+התלקחות",
-        "סוללה+ליתיום+התפוצצה+OR+נדלקה+OR+בוערת",
-        "סוללה+ליתיום+עשן+OR+חממה+OR+בריחה+תרמית",
-        // אופניים חשמליים
-        "אופניים+חשמליים+שריפה+OR+התלקחות+OR+פיצוץ",
-        "אופניים+חשמליים+נדלקו+OR+עלו+באש+OR+עשן",
-        "אופניים+חשמליים+סוללה+שריפה+OR+דליקה",
-        "טעינת+אופניים+חשמליים+שריפה+OR+דליקה",
-        "אופנוע+חשמלי+שריפה+OR+התלקחות",
-        // קורקינט חשמלי
-        "קורקינט+חשמלי+שריפה+OR+התלקחות+OR+פיצוץ",
-        "קורקינט+חשמלי+נדלק+OR+עלה+באש+OR+עשן",
-        "סוללת+קורקינט+שריפה+OR+התלקחות",
-        "טעינת+קורקינט+חשמלי+שריפה+OR+דליקה",
-        // רכב חשמלי
-        "רכב+חשמלי+שריפה+OR+התלקחות+OR+נדלק",
-        "רכב+חשמלי+עלה+באש+OR+בוער+OR+דליקה",
-        "סוללת+רכב+חשמלי+שריפה+OR+התלקחות",
-        "טעינת+רכב+חשמלי+שריפה+OR+חניון",
-        "טסלה+OR+BYD+שריפה+סוללה",
-        // רכב היברידי
-        "רכב+היברידי+שריפה+OR+התלקחות+OR+נדלק",
-        "רכב+היברידי+סוללה+OR+פלאג+אין+שריפה",
-        // קלנועית
-        "קלנועית+חשמלית+שריפה+OR+התלקחות+OR+נדלקה",
-        "סוללת+קלנועית+שריפה+OR+התלקחות",
-        // מתקן אגירת אנרגיה
-        "מתקן+אגירת+אנרגיה+שריפה+OR+התלקחות+OR+פיצוץ",
-        "חוות+סוללות+שריפה+OR+התלקחות",
-        "מאגר+סוללות+שריפה+OR+אגירה+סוללות+שריפה",
-        "מערכת+אגירה+סוללות+שריפה+OR+סולארי+סוללות",
-        // פאוורבנק ומטענים
-        "פאוורבנק+שריפה+OR+התלקח+OR+נדלק+OR+פיצוץ",
-        "מטען+סוללה+שריפה+OR+נדלק+OR+ליתיום",
-        // טלפון, טאבלט, מחשב
-        "טלפון+סוללה+התפוצץ+OR+נדלק+OR+שריפה",
-        "מחשב+נייד+סוללה+שריפה+OR+נדלק",
-        "טאבלט+סוללה+שריפה+OR+נדלק",
-        // UPS, סיגריה אלקטרונית, ציוד
-        "UPS+סוללה+שריפה+OR+התלקח+OR+ליתיום",
-        "סיגריה+אלקטרונית+סוללה+התפוצצה+OR+שריפה",
-        "כלי+עבודה+OR+רחפן+OR+שואב+סוללה+שריפה",
-        // מיקומים
-        "סוללה+שריפה+דירה+OR+בניין+OR+חניון",
-        "סוללה+שריפה+מוסך+OR+חנות+OR+מחסן",
-        // פציעות
-        "כוויות+סוללת+ליתיום+OR+אופניים+חשמליים",
-        "נהרג+OR+נספה+שריפה+סוללה+OR+ליתיום",
-      ];
-
-      const allArticles: string[] = [];
-      for (const q of queries) {
-        try {
-          const fullQuery = `${q}+after:${dateAfter}+before:${dateBefore}`;
-          const gUrl = `https://news.google.com/rss/search?q=${fullQuery}&hl=he&gl=IL&ceid=IL:he`;
-          const res = await fetch(gUrl, { signal: AbortSignal.timeout(8000) });
-          if (!res.ok) continue;
-          const text = await res.text();
-
-          const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
-          let m;
-          while ((m = itemRegex.exec(text)) !== null) {
-            const title = m[1].match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/)?.[1] || "";
-            const pubDate = m[1].match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || "";
-            if (title.length > 10) allArticles.push(`(${pubDate}) ${title}`);
-          }
-        } catch {}
-      }
-
-      // Dedup
-      const seen = new Set<string>();
-      const unique = allArticles.filter(a => {
-        const key = a.substring(0, 60);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-
-      if (unique.length === 0) {
-        return Response.json({
-          status: "ok", mode: "news", period: `${MONTH_NAMES[month-1]} ${year}`,
-          articles_found: 0, found: 0, inserted: 0, duplicates: 0,
-          duration_ms: Date.now() - startTime,
-        });
-      }
-
-      // Analyze with Groq (max 20 articles)
-      const articleText = unique.slice(0, 20).join("\n");
-      const prompt = `נתח את הכותרות הבאות מחדשות ישראל ומצא אירועי שריפה/התלקחות/פיצוץ של סוללות ליתיום בלבד.
-לא לכלול: תאונות דרכים, כתבות כלליות על בטיחות, חקיקה.
-מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
-
-החזר JSON array בלבד:
-[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
-אם אין — החזר []
-
-הכותרות:
-${articleText}`;
-
-      const groqText = await callGroq(prompt);
-      const incidents = parseLlmJson(groqText);
-      const { inserted, duplicates } = await processIncidents(incidents, "archive_news_groq");
-
-      return Response.json({
-        status: "ok", mode: "news", period: `${MONTH_NAMES[month-1]} ${year}`,
-        articles_found: unique.length, found: incidents.length, inserted, duplicates,
-        sample_articles: unique.slice(0, 5),
-        duration_ms: Date.now() - startTime,
-      });
+    // DEFAULT MODE: Gemini knowledge (the main mode!)
+    if (!GEMINI_KEY) {
+      return Response.json({ error: "missing GEMINI_API_KEY", status: "error" }, { status: 500 });
     }
 
-    // MODE 4: Gemini knowledge (when quota available)
-    if (mode === "gemini") {
-      const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
-      if (!GEMINI_KEY) {
-        return Response.json({ error: "missing GEMINI_API_KEY" }, { status: 500 });
-      }
-      const monthName = MONTH_NAMES[month - 1];
-      const prompt = `אתה חוקר שריפות סוללות ליתיום בישראל. רשום את כל אירועי שריפה, התלקחות או פיצוץ של סוללות ליתיום שקרו בישראל בחודש ${monthName} ${year}.
+    const prompt = buildGeminiPrompt(monthName, year);
+    const geminiText = await callGemini(prompt);
+    const incidents = parseLlmJson(geminiText);
+    const { inserted, duplicates } = await processIncidents(incidents, "archive_gemini");
 
-כלול: אופניים חשמליים, קורקינטים חשמליים, רכבים חשמליים, קלנועיות, טלפונים, פאוורבנקים, UPS, מחשבים ניידים, כל מכשיר עם סוללת ליתיום.
-לא לכלול: תאונות דרכים רגילות ללא שריפה, גניבות, חקיקה, מאמרי דעה, כתבות כלליות.
-רק אירועים אמיתיים וספציפיים שדווחו בתקשורת הישראלית!
-מחוזות: צפון, חוף, דן, מרכז, ירושלים, יו"ש, דרום
-
-החזר JSON array בלבד. בלי markdown בלי backticks:
-[{"incident_date":"YYYY-MM-DD","city":"עיר","district":"מחוז","device_type":"סוג","severity":"קל/בינוני/חמור/קריטי","injuries":0,"fatalities":0,"property_damage":true,"description":"תיאור קצר","source_name":"מקור","source_url":""}]
-אם אין — החזר []`;
-
-      const gRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.15, maxOutputTokens: 8192 },
-          }),
-        }
-      );
-      if (!gRes.ok) throw new Error(`gemini_${gRes.status}`);
-      const gData = await gRes.json();
-      const gText = gData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      const incidents = parseLlmJson(gText);
-      const { inserted, duplicates } = await processIncidents(incidents, "archive_gemini");
-
-      return Response.json({
-        status: "ok", mode: "gemini", period: `${monthName} ${year}`,
-        found: incidents.length, inserted, duplicates,
-        duration_ms: Date.now() - startTime,
-      });
-    }
-
-    const result = await scanKnowledge(year, month);
-    return Response.json({ status: "ok", mode: "knowledge", ...result, duration_ms: Date.now() - startTime });
+    return Response.json({
+      status: "ok",
+      mode: "gemini",
+      period: `${monthName} ${year}`,
+      found: incidents.length,
+      inserted,
+      duplicates,
+      duration_ms: Date.now() - startTime,
+    });
 
   } catch (e: any) {
     return Response.json({ status: "error", message: e.message, duration_ms: Date.now() - startTime }, { status: 500 });
