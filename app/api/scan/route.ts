@@ -51,6 +51,8 @@ const GOOGLE_NEWS_QUERIES = [
 // ============================================
 const TELEGRAM_CHANNELS = [
   "fireisrael777",    // כבאות והצלה ארצי (לא רשמי, מבצעי)
+  "mdaisrael",        // מגן דוד אדום (רשמי)
+  "uh1221",           // איחוד הצלה (רשמי)
   "maborhz",          // מבזקי חדשות
   "newslocker",        // נעילת חדשות
   "kann11news",        // כאן 11
