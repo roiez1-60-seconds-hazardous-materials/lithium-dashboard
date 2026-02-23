@@ -1,9 +1,9 @@
 // app/api/scan-archive/route.ts
-// V7 — Gemini-only archive scanner
-// One Gemini call per month = fast, accurate, knows Israeli incidents
+// V7 — Dual: Groq primary (14,400/day), Gemini fallback
+// One LLM call per month — asks AI directly about incidents
 // Usage:
-//   /api/scan-archive?year=2024&month=6              → Gemini knowledge
-//   /api/scan-archive?year=2024&month=6&mode=news    → Google News + Groq fallback
+//   /api/scan-archive?year=2024&month=6              → Groq knowledge
+//   /api/scan-archive?year=2024&month=6&mode=gemini  → Force Gemini
 //   /api/scan-archive?telegram=uh1221&q=סוללה        → Telegram + Groq
 
 export const runtime = "edge";
@@ -22,7 +22,7 @@ const MONTH_NAMES = ["ינואר","פברואר","מרץ","אפריל","מאי",
 // ============================================
 async function callGemini(prompt: string): Promise<string> {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
