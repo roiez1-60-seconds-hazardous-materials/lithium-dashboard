@@ -13,13 +13,13 @@ export async function GET(request) {
     let query = supabase
       .from("incidents")
       .select("*")
-      .order("event_date", { ascending: false })
+      .order("incident_date", { ascending: false })
       .limit(limit);
 
     if (year) {
       query = query
-        .gte("event_date", `${year}-01-01`)
-        .lte("event_date", `${year}-12-31`);
+        .gte("incident_date", `${year}-01-01`)
+        .lte("incident_date", `${year}-12-31`);
     }
     if (device) {
       query = query.eq("device_type", device);
@@ -46,7 +46,7 @@ export async function GET(request) {
     // Yearly breakdown
     const yearlyCounts = {};
     incidents.forEach((i) => {
-      const y = i.event_date ? new Date(i.event_date).getFullYear() : "unknown";
+      const y = i.incident_date ? new Date(i.incident_date).getFullYear() : "unknown";
       yearlyCounts[y] = (yearlyCounts[y] || 0) + 1;
     });
 
@@ -54,9 +54,9 @@ export async function GET(request) {
     const currentYear = new Date().getFullYear();
     const monthlyCounts = {};
     incidents
-      .filter((i) => i.event_date && new Date(i.event_date).getFullYear() === currentYear)
+      .filter((i) => i.incident_date && new Date(i.incident_date).getFullYear() === currentYear)
       .forEach((i) => {
-        const m = new Date(i.event_date).getMonth() + 1;
+        const m = new Date(i.incident_date).getMonth() + 1;
         monthlyCounts[m] = (monthlyCounts[m] || 0) + 1;
       });
 
