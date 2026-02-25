@@ -205,7 +205,7 @@ export default function Dashboard() {
   }, []);
 
   /* ---- years ---- */
-  const years = useMemo(() => [...new Set(data.map(i => new Date(i.incident_date).getFullYear()))].sort((a, b) => b - a), [data]);
+  const years = useMemo(() => Array.from(new Set(data.map(i => new Date(i.incident_date).getFullYear()))).sort((a, b) => b - a), [data]);
 
   /* ---- year-filtered ---- */
   const yf = useMemo(() => year === "הכל" ? data : data.filter(i => new Date(i.incident_date).getFullYear() === year), [data, year]);
@@ -636,7 +636,7 @@ export default function Dashboard() {
             <Glass>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>📡 מקורות</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {[...new Set(data.map(i => i.source_name).filter(Boolean))].map(s => (
+                {Array.from(new Set(data.map(i => i.source_name).filter(Boolean))).map(s => (
                   <span key={s} style={{ fontSize: 11, padding: "4px 10px", borderRadius: 8, background: "rgba(255,255,255,.04)", color: "#94a3b8", border: "1px solid rgba(255,255,255,.06)" }}>{s}</span>
                 ))}
               </div>
