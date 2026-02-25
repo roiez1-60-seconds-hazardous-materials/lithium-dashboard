@@ -2,21 +2,21 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, AreaChart,
 } from "recharts";
 
 // ===========================================
 // CONSTANTS
 // ===========================================
-const DEVICE_ICONS = {
+const DEVICE_ICONS: Record<string, string> = {
   "אופניים חשמליים": "🚲", "קורקינט": "🛴", "רכב חשמלי": "🚗",
   "רכב היברידי": "🚙", "מתקן אגירה": "🔋", "קלנועית": "🏍️",
   "טלפון": "📱", "פאוורבנק": "🔌", "אוטובוס חשמלי": "🚌",
   "מחשב נייד": "💻", "אחר": "⚡",
 };
 
-const DEVICE_COLORS = {
+const DEVICE_COLORS: Record<string, string> = {
   "אופניים חשמליים": "#3b82f6", "קורקינט": "#8b5cf6",
   "רכב חשמלי": "#ef4444", "רכב היברידי": "#f97316",
   "מתקן אגירה": "#22c55e", "קלנועית": "#ec4899",
@@ -24,7 +24,7 @@ const DEVICE_COLORS = {
   "אוטובוס חשמלי": "#f59e0b", "מחשב נייד": "#a855f7", "אחר": "#6b7280",
 };
 
-const SEVERITY_CONFIG = {
+const SEVERITY_CONFIG: Record<string, { color: string; bg: string; icon: string }> = {
   "קריטית": { color: "#dc2626", bg: "rgba(220,38,38,0.15)", icon: "🔴" },
   "גבוהה": { color: "#f97316", bg: "rgba(249,115,22,0.15)", icon: "🟠" },
   "בינונית": { color: "#eab308", bg: "rgba(234,179,8,0.15)", icon: "🟡" },
@@ -198,16 +198,59 @@ const GlobalStyles = () => (
       background: rgba(239,68,68,0.3);
       transform: scale(1.1);
     }
+    .accent-red::before { background: linear-gradient(90deg, #ef4444, #ef444488) !important; }
+    .accent-darkred::before { background: linear-gradient(90deg, #dc2626, #dc262688) !important; }
+    .accent-orange::before { background: linear-gradient(90deg, #f97316, #f9731688) !important; }
+    .accent-purple::before { background: linear-gradient(90deg, #8b5cf6, #8b5cf688) !important; }
   `}</style>
 );
+
+// ===========================================
+// TYPES
+// ===========================================
+interface Incident {
+  id?: string;
+  title?: string;
+  city?: string;
+  event_date?: string;
+  device_type?: string;
+  severity?: string;
+  deaths?: number;
+  injuries?: number;
+  description?: string;
+  source_url?: string;
+  source_name?: string;
+}
+
+interface Stats {
+  totalIncidents?: number;
+  totalDeaths?: number;
+  totalInjuries?: number;
+  deviceCounts?: Record<string, number>;
+  yearlyCounts?: Record<string, number>;
+  monthlyCounts?: Record<string, number>;
+  topCities?: [string, number][];
+  severityCounts?: Record<string, number>;
+}
+
+interface SearchRun {
+  id?: string;
+  started_at?: string;
+  status?: string;
+  new_incidents?: number;
+}
 
 // ===========================================
 // DATA HOOK
 // ===========================================
 function useLiveData() {
-  const [data, setData] = useState({ incidents: [], stats: {}, loading: true });
-  const [analysis, setAnalysis] = useState({ searchRuns: [], lastUpdate: null, systemStatus: "loading" });
-  const [error, setError] = useState(null);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [stats, setStats] = useState<Stats>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchRuns, setSearchRuns] = useState<SearchRun[]>([]);
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null);
+  const [systemStatus, setSystemStatus] = useState("loading");
 
   const fetchData = useCallback(async () => {
     try {
@@ -219,16 +262,16 @@ function useLiveData() {
       if (!incRes.ok) throw new Error("Incidents API: " + incRes.status);
       const incData = await incRes.json();
       const analData = analRes.ok ? await analRes.json() : {};
-      setData({ incidents: incData.incidents || [], stats: incData.stats || {}, loading: false });
-      setAnalysis({
-        searchRuns: analData.searchRuns || [],
-        lastUpdate: analData.lastUpdate || null,
-        systemStatus: analData.systemStatus || "active",
-      });
-    } catch (e) {
+      setIncidents(incData.incidents || []);
+      setStats(incData.stats || {});
+      setLoading(false);
+      setSearchRuns(analData.searchRuns || []);
+      setLastUpdate(analData.lastUpdate || null);
+      setSystemStatus(analData.systemStatus || "active");
+    } catch (e: any) {
       console.error("Fetch error:", e);
       setError(e.message);
-      setData((prev) => ({ ...prev, loading: false }));
+      setLoading(false);
     }
   }, []);
 
@@ -238,7 +281,7 @@ function useLiveData() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  return { data, analysis, error, refresh: fetchData };
+  return { incidents, stats, loading, error, searchRuns, lastUpdate, systemStatus, refresh: fetchData };
 }
 
 // ===========================================
@@ -259,7 +302,7 @@ function LoadingState() {
   );
 }
 
-function ErrorState({ error, onRetry }) {
+function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div style={{ textAlign: "center", padding: "80px 20px" }}>
       <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
@@ -274,7 +317,7 @@ function ErrorState({ error, onRetry }) {
   );
 }
 
-function LiveIndicator({ lastUpdate, status }) {
+function LiveIndicator({ lastUpdate, status }: { lastUpdate?: string | null; status?: string }) {
   const timeAgo = lastUpdate ? Math.round((Date.now() - new Date(lastUpdate).getTime()) / 60000) : null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
@@ -291,9 +334,11 @@ function LiveIndicator({ lastUpdate, status }) {
   );
 }
 
-function StatCard({ icon, label, value, color = "#ef4444" }) {
+function StatCard({ icon, label, value, color = "#ef4444", accentClass = "accent-red" }: {
+  icon: string; label: string; value: string | number; color?: string; accentClass?: string;
+}) {
   return (
-    <div className="glass-card stat-card" style={{ padding: "16px 18px", "--accent-gradient": "linear-gradient(90deg, " + color + ", " + color + "88)" }}>
+    <div className={`glass-card stat-card ${accentClass}`} style={{ padding: "16px 18px" }}>
       <span style={{ fontSize: 28 }}>{icon}</span>
       <div style={{ fontSize: 32, fontWeight: 800, color, marginTop: 8, lineHeight: 1 }}>
         {typeof value === "number" ? value.toLocaleString("he-IL") : value}
@@ -303,12 +348,12 @@ function StatCard({ icon, label, value, color = "#ef4444" }) {
   );
 }
 
-function SeverityBadge({ severity }) {
-  const cfg = SEVERITY_CONFIG[severity] || SEVERITY_CONFIG["בינונית"];
+function SeverityBadge({ severity }: { severity?: string }) {
+  const cfg = SEVERITY_CONFIG[severity || "בינונית"] || SEVERITY_CONFIG["בינונית"];
   return <span className="badge" style={{ background: cfg.bg, color: cfg.color }}>{cfg.icon} {severity}</span>;
 }
 
-function CustomTooltip({ active, payload, label }) {
+function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
@@ -316,7 +361,7 @@ function CustomTooltip({ active, payload, label }) {
       borderRadius: 10, padding: "10px 14px", backdropFilter: "blur(10px)",
     }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>{label}</div>
-      {payload.map((p, i) => (
+      {payload.map((p: any, i: number) => (
         <div key={i} style={{ fontSize: 11, color: p.color || "#94a3b8", display: "flex", gap: 8 }}>
           <span>{p.name}:</span>
           <span style={{ fontWeight: 700 }}>{p.value}</span>
@@ -330,7 +375,7 @@ function CustomTooltip({ active, payload, label }) {
 // CHARTS
 // ===========================================
 
-function EmptyChart({ label }) {
+function EmptyChart({ label }: { label: string }) {
   return (
     <div className="glass-card" style={{ padding: 40, textAlign: "center", color: "#475569", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
       <span style={{ fontSize: 32 }}>📭</span>
@@ -339,7 +384,7 @@ function EmptyChart({ label }) {
   );
 }
 
-function YearlyChart({ yearlyCounts }) {
+function YearlyChart({ yearlyCounts }: { yearlyCounts: Record<string, number> }) {
   const data = Object.entries(yearlyCounts)
     .filter(([y]) => y !== "unknown")
     .sort((a, b) => Number(a[0]) - Number(b[0]))
@@ -367,7 +412,7 @@ function YearlyChart({ yearlyCounts }) {
   );
 }
 
-function MonthlyChart({ monthlyCounts }) {
+function MonthlyChart({ monthlyCounts }: { monthlyCounts: Record<string, number> }) {
   const data = Array.from({ length: 12 }, (_, i) => ({ month: MONTHS_HE[i], count: monthlyCounts[i + 1] || 0 }));
   return (
     <div className="glass-card fade-in" style={{ padding: "20px 16px" }}>
@@ -385,7 +430,7 @@ function MonthlyChart({ monthlyCounts }) {
   );
 }
 
-function DevicePieChart({ deviceCounts }) {
+function DevicePieChart({ deviceCounts }: { deviceCounts: Record<string, number> }) {
   const data = Object.entries(deviceCounts)
     .sort((a, b) => b[1] - a[1])
     .map(([name, value]) => ({ name, value, color: DEVICE_COLORS[name] || "#6b7280", icon: DEVICE_ICONS[name] || "⚡" }));
@@ -419,7 +464,7 @@ function DevicePieChart({ deviceCounts }) {
   );
 }
 
-function TopCitiesChart({ topCities }) {
+function TopCitiesChart({ topCities }: { topCities: [string, number][] }) {
   const data = topCities.map(([city, count]) => ({ city, count }));
   if (!data.length) return <EmptyChart label="אין נתוני ערים" />;
   return (
@@ -442,7 +487,7 @@ function TopCitiesChart({ topCities }) {
 // INCIDENT LIST
 // ===========================================
 
-function IncidentList({ incidents }) {
+function IncidentList({ incidents }: { incidents: Incident[] }) {
   const [showCount, setShowCount] = useState(10);
   const visible = incidents.slice(0, showCount);
   return (
@@ -453,7 +498,7 @@ function IncidentList({ incidents }) {
           <div key={inc.id || i} className="incident-card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 20, flexShrink: 0 }}>{DEVICE_ICONS[inc.device_type] || "⚡"}</span>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>{DEVICE_ICONS[inc.device_type || ""] || "⚡"}</span>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {inc.title || "שריפת " + inc.device_type}
@@ -465,14 +510,14 @@ function IncidentList({ incidents }) {
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                 <SeverityBadge severity={inc.severity} />
-                {(inc.deaths > 0 || inc.injuries > 0) && (
+                {((inc.deaths || 0) > 0 || (inc.injuries || 0) > 0) && (
                   <span className="badge" style={{
-                    background: inc.deaths > 0 ? "rgba(220,38,38,0.15)" : "rgba(249,115,22,0.15)",
-                    color: inc.deaths > 0 ? "#dc2626" : "#f97316",
+                    background: (inc.deaths || 0) > 0 ? "rgba(220,38,38,0.15)" : "rgba(249,115,22,0.15)",
+                    color: (inc.deaths || 0) > 0 ? "#dc2626" : "#f97316",
                   }}>
-                    {inc.deaths > 0 && "💀" + inc.deaths}
-                    {inc.deaths > 0 && inc.injuries > 0 && " "}
-                    {inc.injuries > 0 && "🤕" + inc.injuries}
+                    {(inc.deaths || 0) > 0 && "💀" + inc.deaths}
+                    {(inc.deaths || 0) > 0 && (inc.injuries || 0) > 0 && " "}
+                    {(inc.injuries || 0) > 0 && "🤕" + inc.injuries}
                   </span>
                 )}
               </div>
@@ -485,7 +530,7 @@ function IncidentList({ incidents }) {
               }}>{inc.description}</div>
             )}
             {inc.source_url && (
-              <a href={inc.source_url} target="_blank" rel="noopener" style={{
+              <a href={inc.source_url} target="_blank" rel="noopener noreferrer" style={{
                 display: "inline-block", marginTop: 6, fontSize: 11, color: "#3b82f6", textDecoration: "none",
               }}>🔗 {inc.source_name || "מקור"}</a>
             )}
@@ -507,14 +552,16 @@ function IncidentList({ incidents }) {
 // SYSTEM STATUS
 // ===========================================
 
-function SystemStatus({ searchRuns, lastUpdate, status }) {
+function SystemStatus({ searchRuns, lastUpdate, status }: {
+  searchRuns: SearchRun[]; lastUpdate: string | null; status: string;
+}) {
   return (
     <div className="glass-card fade-in" style={{ padding: "20px 16px" }}>
       <h3 style={{ fontSize: 14, fontWeight: 700, color: "#cbd5e1", marginBottom: 16 }}>⚙️ מצב מערכת</h3>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {[
           { label: "סטטוס", value: status === "active" ? "פעיל" : "בדיקה", ok: status === "active" },
-          { label: "סריקות שבוצעו", value: searchRuns?.length || 0, ok: true },
+          { label: "סריקות שבוצעו", value: String(searchRuns?.length || 0), ok: true },
           { label: "עדכון אחרון", value: lastUpdate ? new Date(lastUpdate).toLocaleString("he-IL") : "טרם", ok: !!lastUpdate },
         ].map((s) => (
           <div key={s.label} style={{
@@ -537,7 +584,7 @@ function SystemStatus({ searchRuns, lastUpdate, status }) {
               display: "flex", justifyContent: "space-between", fontSize: 11,
               padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.02)", color: "#64748b",
             }}>
-              <span>{new Date(run.started_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" })}</span>
+              <span>{run.started_at ? new Date(run.started_at).toLocaleString("he-IL", { dateStyle: "short", timeStyle: "short" }) : ""}</span>
               <span style={{
                 color: run.status === "completed" ? "#22c55e" : run.status === "failed" ? "#ef4444" : "#eab308",
                 fontWeight: 600,
@@ -556,7 +603,7 @@ function SystemStatus({ searchRuns, lastUpdate, status }) {
 // LATEST ALERT BANNER
 // ===========================================
 
-function LatestAlert({ incident }) {
+function LatestAlert({ incident }: { incident: Incident | null }) {
   if (!incident) return null;
   return (
     <div className="fade-in" style={{
@@ -564,7 +611,7 @@ function LatestAlert({ incident }) {
       border: "1px solid rgba(220,38,38,0.2)", borderRadius: 14, padding: "14px 18px",
       marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
     }}>
-      <span style={{ fontSize: 24 }}>{DEVICE_ICONS[incident.device_type] || "🔥"}</span>
+      <span style={{ fontSize: 24 }}>{DEVICE_ICONS[incident.device_type || ""] || "🔥"}</span>
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5" }}>
           אירוע אחרון: {incident.title || "שריפת " + incident.device_type}
@@ -582,7 +629,7 @@ function LatestAlert({ incident }) {
 // HEADER
 // ===========================================
 
-function Header({ lastUpdate, systemStatus }) {
+function Header({ lastUpdate, systemStatus }: { lastUpdate?: string | null; systemStatus?: string }) {
   return (
     <header className="header-gradient" style={{ padding: 16, position: "sticky", top: 0, zIndex: 50 }}>
       <div style={{ maxWidth: 1400, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
@@ -604,9 +651,7 @@ function Header({ lastUpdate, systemStatus }) {
 // ===========================================
 
 export default function LithiumDashboard() {
-  const { data, analysis, error, refresh } = useLiveData();
-  const { incidents, stats, loading } = data;
-  const { searchRuns, lastUpdate, systemStatus } = analysis;
+  const { incidents, stats, loading, error, searchRuns, lastUpdate, systemStatus, refresh } = useLiveData();
   const [activeTab, setActiveTab] = useState("overview");
   const [showScrollTop, setShowScrollTop] = useState(false);
 
@@ -647,10 +692,14 @@ export default function LithiumDashboard() {
         {activeTab === "overview" && (
           <div className="fade-in">
             <div className="grid-4" style={{ marginBottom: 16 }}>
-              <StatCard icon="🔥" label="סה״כ אירועים" value={stats.totalIncidents || 0} color="#ef4444" />
-              <StatCard icon="💀" label="הרוגים" value={stats.totalDeaths || 0} color="#dc2626" />
-              <StatCard icon="🤕" label="פצועים" value={stats.totalInjuries || 0} color="#f97316" />
-              <StatCard icon="📱" label="סוג מוביל" value={stats.deviceCounts ? (Object.entries(stats.deviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—") : "—"} color="#8b5cf6" />
+              <StatCard icon="🔥" label="סה״כ אירועים" value={stats.totalIncidents || 0} color="#ef4444" accentClass="accent-red" />
+              <StatCard icon="💀" label="הרוגים" value={stats.totalDeaths || 0} color="#dc2626" accentClass="accent-darkred" />
+              <StatCard icon="🤕" label="פצועים" value={stats.totalInjuries || 0} color="#f97316" accentClass="accent-orange" />
+              <StatCard
+                icon="📱" label="סוג מוביל"
+                value={stats.deviceCounts ? (Object.entries(stats.deviceCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "—") : "—"}
+                color="#8b5cf6" accentClass="accent-purple"
+              />
             </div>
             <div className="grid-2" style={{ marginBottom: 16 }}>
               <YearlyChart yearlyCounts={stats.yearlyCounts || {}} />
@@ -733,7 +782,7 @@ export default function LithiumDashboard() {
                   const d = await res.json();
                   alert("סריקה הושלמה!\nנסרקו: " + (d.scanned || 0) + "\nנוספו: " + (d.inserted || 0));
                   refresh();
-                } catch (e) { alert("שגיאה בסריקה: " + e.message); }
+                } catch (e: any) { alert("שגיאה בסריקה: " + e.message); }
               }} style={{
                 width: "100%", marginTop: 16, padding: 12,
                 background: "linear-gradient(135deg, rgba(239,68,68,0.2), rgba(249,115,22,0.15))",
