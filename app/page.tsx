@@ -208,7 +208,7 @@ export default function Dashboard() {
   const years = useMemo(() => Array.from(new Set(data.map(i => new Date(i.incident_date).getFullYear()))).sort((a, b) => b - a), [data]);
 
   /* ---- year-filtered ---- */
-  const yf = useMemo(() => year === "הכל" ? data : data.filter(i => new Date(i.incident_date).getFullYear() === year), [data, year]);
+  const yf = useMemo(() => year === "הכל" ? data : data.filter(i => new Date(i.incident_date).getFullYear() === Number(year)), [data, year]);
 
   /* ---- stats ---- */
   const S = useMemo(() => {
