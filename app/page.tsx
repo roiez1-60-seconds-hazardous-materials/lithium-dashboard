@@ -209,10 +209,10 @@ const GlobalStyles = () => (
 // TYPES
 // ===========================================
 interface Incident {
-  id?: string;
+  id?: number;
   title?: string;
   city?: string;
-  event_date?: string;
+  incident_date?: string;
   device_type?: string;
   severity?: string;
   deaths?: number;
@@ -220,6 +220,8 @@ interface Incident {
   description?: string;
   source_url?: string;
   source_name?: string;
+  district?: string;
+  address?: string;
 }
 
 interface Stats {
@@ -501,10 +503,10 @@ function IncidentList({ incidents }: { incidents: Incident[] }) {
                 <span style={{ fontSize: 20, flexShrink: 0 }}>{DEVICE_ICONS[inc.device_type || ""] || "⚡"}</span>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {inc.title || "שריפת " + inc.device_type}
+                    {inc.title || inc.description || "שריפת " + inc.device_type}
                   </div>
                   <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-                    {inc.city}{inc.event_date && " · " + new Date(inc.event_date).toLocaleDateString("he-IL")}
+                    {inc.city}{inc.incident_date && " · " + new Date(inc.incident_date).toLocaleDateString("he-IL")}
                   </div>
                 </div>
               </div>
@@ -614,10 +616,10 @@ function LatestAlert({ incident }: { incident: Incident | null }) {
       <span style={{ fontSize: 24 }}>{DEVICE_ICONS[incident.device_type || ""] || "🔥"}</span>
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5" }}>
-          אירוע אחרון: {incident.title || "שריפת " + incident.device_type}
+          אירוע אחרון: {incident.title || incident.description || "שריפת " + incident.device_type}
         </div>
         <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
-          {incident.city}{incident.event_date && " · " + new Date(incident.event_date).toLocaleDateString("he-IL")}
+          {incident.city}{incident.incident_date && " · " + new Date(incident.incident_date).toLocaleDateString("he-IL")}
         </div>
       </div>
       <SeverityBadge severity={incident.severity} />
@@ -679,7 +681,6 @@ export default function LithiumDashboard() {
       <div className="dashboard-container">
         <LatestAlert incident={latestIncident} />
 
-        {/* Tabs */}
         <div className="tabs-scroll" style={{ marginBottom: 20 }}>
           {tabs.map((tab) => (
             <button key={tab.id} className={"tab-btn" + (activeTab === tab.id ? " active" : "")} onClick={() => setActiveTab(tab.id)}>
@@ -688,7 +689,6 @@ export default function LithiumDashboard() {
           ))}
         </div>
 
-        {/* === OVERVIEW === */}
         {activeTab === "overview" && (
           <div className="fade-in">
             <div className="grid-4" style={{ marginBottom: 16 }}>
@@ -712,10 +712,8 @@ export default function LithiumDashboard() {
           </div>
         )}
 
-        {/* === INCIDENTS === */}
         {activeTab === "incidents" && <IncidentList incidents={incidents} />}
 
-        {/* === ANALYTICS === */}
         {activeTab === "analytics" && (
           <div className="fade-in">
             <div className="grid-2" style={{ marginBottom: 16 }}>
@@ -751,7 +749,6 @@ export default function LithiumDashboard() {
           </div>
         )}
 
-        {/* === SYSTEM === */}
         {activeTab === "system" && (
           <div className="fade-in grid-2">
             <SystemStatus searchRuns={searchRuns} lastUpdate={lastUpdate} status={systemStatus} />
@@ -794,7 +791,6 @@ export default function LithiumDashboard() {
         )}
       </div>
 
-      {/* Footer */}
       <footer style={{
         textAlign: "center", padding: "24px 16px", fontSize: 11,
         color: "#475569", borderTop: "1px solid rgba(255,255,255,0.03)", marginTop: 40,
