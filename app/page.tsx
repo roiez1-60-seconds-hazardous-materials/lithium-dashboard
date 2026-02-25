@@ -3,6 +3,22 @@
 import { useState, useEffect, useMemo } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, AreaChart, Area } from "recharts";
 
+interface Incident {
+  id: number;
+  incident_date: string;
+  city: string;
+  district: string | null;
+  device_type: string;
+  severity: string;
+  fatalities: number;
+  injuries: number;
+  description: string | null;
+  source_name: string | null;
+  source_url: string | null;
+  verified: boolean;
+  data_source: string;
+}
+
 // ============================================================
 // 🔥 LITHIUM FIRE DASHBOARD v3 — SUPABASE LIVE
 // כבאות והצלה לישראל
@@ -10,7 +26,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 // district, device_type, severity, description, source_name
 // ============================================================
 
-const DEVICE_COLORS = {
+const DEVICE_COLORS: Record<string, string> = {
   "אופניים חשמליים": "#f97316",
   "קורקינט חשמלי": "#8b5cf6",
   "רכב חשמלי": "#3b82f6",
@@ -20,7 +36,7 @@ const DEVICE_COLORS = {
   "סוללת מחשב": "#f59e0b",
   "אחר": "#6b7280",
 };
-const DEVICE_ICONS = {
+const DEVICE_ICONS: Record<string, string> = {
   "אופניים חשמליים": "🚲",
   "קורקינט חשמלי": "🛴",
   "רכב חשמלי": "🚗",
@@ -30,9 +46,9 @@ const DEVICE_ICONS = {
   "סוללת מחשב": "💻",
   "אחר": "⚡",
 };
-const SEV_COLORS = { "קל": "#22c55e", "בינוני": "#f59e0b", "חמור": "#f97316", "קריטי": "#ef4444" };
-const SEV_BG = { "קל": "rgba(34,197,94,0.12)", "בינוני": "rgba(245,158,11,0.12)", "חמור": "rgba(249,115,22,0.12)", "קריטי": "rgba(239,68,68,0.12)" };
-const DIST_COLORS = { "מרכז": "#3b82f6", "דן": "#f97316", "חוף": "#06b6d4", "צפון": "#22c55e", "דרום": "#f59e0b", "ירושלים": "#a855f7", "שפלה": "#ec4899", "שרון": "#14b8a6", 'יו"ש': "#6366f1" };
+const SEV_COLORS: Record<string, string> = { "קל": "#22c55e", "בינוני": "#f59e0b", "חמור": "#f97316", "קריטי": "#ef4444" };
+const SEV_BG: Record<string, string> = { "קל": "rgba(34,197,94,0.12)", "בינוני": "rgba(245,158,11,0.12)", "חמור": "rgba(249,115,22,0.12)", "קריטי": "rgba(239,68,68,0.12)" };
+const DIST_COLORS: Record<string, string> = { "מרכז": "#3b82f6", "דן": "#f97316", "חוף": "#06b6d4", "צפון": "#22c55e", "דרום": "#f59e0b", "ירושלים": "#a855f7", "שפלה": "#ec4899", "שרון": "#14b8a6", 'יו"ש': "#6366f1" };
 const MONTHS_HE = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
 const TABS = [
   { id: "home", icon: "🏠", label: "ראשי" },
@@ -43,7 +59,7 @@ const TABS = [
 ];
 
 /* ============ small helpers ============ */
-function Tip({ active, payload, label }) {
+function Tip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div style={{ background: "rgba(15,23,42,0.95)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 14px", backdropFilter: "blur(12px)" }}>
@@ -53,7 +69,7 @@ function Tip({ active, payload, label }) {
   );
 }
 
-function Stat({ icon, label, value, sub, color = "#f97316", trend }) {
+function Stat({ icon, label, value, sub, color = "#f97316", trend }: any) {
   return (
     <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: "12px 14px", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", top: -20, left: -20, width: 70, height: 70, borderRadius: "50%", background: `${color}08` }} />
@@ -68,11 +84,11 @@ function Stat({ icon, label, value, sub, color = "#f97316", trend }) {
   );
 }
 
-function Glass({ children, style = {} }) {
+function Glass({ children, style = {} }: any) {
   return <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 18, padding: 16, ...style }}>{children}</div>;
 }
 
-function YearBar({ years, sel, onChange }) {
+function YearBar({ years, sel, onChange }: any) {
   return (
     <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
       {["הכל", ...years].map(y => (
@@ -89,7 +105,7 @@ function YearBar({ years, sel, onChange }) {
 }
 
 /* ============ Incident Card ============ */
-function IncCard({ inc, onClick }) {
+function IncCard({ inc, onClick }: { inc: Incident; onClick: () => void }) {
   const sc = SEV_COLORS[inc.severity] || "#6b7280";
   const dc = DEVICE_COLORS[inc.device_type] || "#6b7280";
   const di = DEVICE_ICONS[inc.device_type] || "⚡";
@@ -123,7 +139,7 @@ function IncCard({ inc, onClick }) {
 }
 
 /* ============ Modal ============ */
-function Modal({ inc, onClose }) {
+function Modal({ inc, onClose }: { inc: Incident | null; onClose: () => void }) {
   if (!inc) return null;
   const sc = SEV_COLORS[inc.severity] || "#6b7280";
   return (
@@ -171,9 +187,9 @@ function Modal({ inc, onClose }) {
    ============================================================ */
 export default function Dashboard() {
   const [tab, setTab] = useState("home");
-  const [data, setData] = useState([]);
+  const [data, setData] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selInc, setSelInc] = useState(null);
+  const [selInc, setSelInc] = useState<Incident | null>(null);
   const [devF, setDevF] = useState("הכל");
   const [sevF, setSevF] = useState("הכל");
   const [year, setYear] = useState("הכל");
@@ -217,14 +233,14 @@ export default function Dashboard() {
     const totalF = yf.reduce((s, i) => s + (i.fatalities || 0), 0);
     const totalI = yf.reduce((s, i) => s + (i.injuries || 0), 0);
 
-    const byDev = {}; yf.forEach(i => { byDev[i.device_type] = (byDev[i.device_type] || 0) + 1; });
-    const devData = Object.entries(byDev).map(([n, v]) => ({ name: n, value: v, color: DEVICE_COLORS[n] || "#6b7280" })).sort((a, b) => b.value - a.value);
+    const byDev: Record<string, number> = {}; yf.forEach(i => { byDev[i.device_type] = (byDev[i.device_type] || 0) + 1; });
+    const devData = Object.entries(byDev).map(([n, v]: [string, number]) => ({ name: n, value: v, color: DEVICE_COLORS[n] || "#6b7280" })).sort((a, b) => b.value - a.value);
 
-    const bySev = {}; yf.forEach(i => { bySev[i.severity] = (bySev[i.severity] || 0) + 1; });
-    const sevData = Object.entries(bySev).map(([n, v]) => ({ name: n, value: v, color: SEV_COLORS[n] || "#6b7280" })).sort((a, b) => b.value - a.value);
+    const bySev: Record<string, number> = {}; yf.forEach(i => { bySev[i.severity] = (bySev[i.severity] || 0) + 1; });
+    const sevData = Object.entries(bySev).map(([n, v]: [string, number]) => ({ name: n, value: v, color: SEV_COLORS[n] || "#6b7280" })).sort((a, b) => b.value - a.value);
 
-    const byDist = {}; yf.forEach(i => { if (i.district) byDist[i.district] = (byDist[i.district] || 0) + 1; });
-    const distData = Object.entries(byDist).map(([n, v]) => ({ name: n, value: v, fill: DIST_COLORS[n] || "#6b7280" })).sort((a, b) => b.value - a.value);
+    const byDist: Record<string, number> = {}; yf.forEach(i => { if (i.district) byDist[i.district] = (byDist[i.district] || 0) + 1; });
+    const distData = Object.entries(byDist).map(([n, v]: [string, number]) => ({ name: n, value: v, fill: DIST_COLORS[n] || "#6b7280" })).sort((a, b) => b.value - a.value);
 
     /* monthly */
     const monthly = [];
@@ -234,7 +250,7 @@ export default function Dashboard() {
         monthly.push({ month: MONTHS_HE[m], count: mi.length, fatalities: mi.reduce((s, x) => s + (x.fatalities || 0), 0), injuries: mi.reduce((s, x) => s + (x.injuries || 0), 0) });
       }
     } else {
-      const bm = {};
+      const bm: Record<string, {c:number,f:number,inj:number}> = {};
       yf.forEach(i => {
         const d = new Date(i.incident_date);
         const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -248,7 +264,7 @@ export default function Dashboard() {
     }
 
     /* yearly (always full) */
-    const byYr = {};
+    const byYr: Record<string, {year:number,total:number,fatalities:number,injuries:number}> = {};
     data.forEach(i => {
       const y2 = new Date(i.incident_date).getFullYear();
       if (!byYr[y2]) byYr[y2] = { year: y2, total: 0, fatalities: 0, injuries: 0 };
@@ -257,7 +273,7 @@ export default function Dashboard() {
     const yrData = Object.values(byYr).sort((a, b) => a.year - b.year);
 
     /* cities */
-    const byCity = {};
+    const byCity: Record<string, {c:number,f:number,inj:number}> = {};
     yf.forEach(i => {
       if (!byCity[i.city]) byCity[i.city] = { c: 0, f: 0, inj: 0 };
       byCity[i.city].c++; byCity[i.city].f += i.fatalities || 0; byCity[i.city].inj += i.injuries || 0;
