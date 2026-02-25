@@ -268,7 +268,7 @@ export default function LithiumDashboard() {
       color: "#fafaf9",
       fontFamily: "'Rubik', -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif",
       
-      maxWidth: 430,
+      maxWidth: 1200,
       margin: "0 auto",
       position: "relative",
       overflow: "hidden",
@@ -684,6 +684,7 @@ export default function LithiumDashboard() {
         borderRadius: 26, padding: "5px 6px",
         display: "flex", gap: 3, zIndex: 100,
         boxShadow: "0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04)",
+        maxWidth: 400,
       }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setSelInc(null); }} style={{
