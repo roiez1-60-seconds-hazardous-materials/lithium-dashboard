@@ -367,7 +367,6 @@ export default function Dashboard() {
 
             {/* YEARLY + PREDICTION */}
             <Glass>
-            <Glass>
               <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>📈 מגמה שנתית + תחזית</div>
               <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>עמודות מלאות = בפועל | עמודות מקווקוות = תחזית</div>
               <div style={{height:240}}><ResponsiveContainer><BarChart data={S.yrPred}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)"/><XAxis dataKey="year" tick={{fontSize:11,fill:"#64748b"}}/><YAxis tick={{fontSize:11,fill:"#64748b"}}/><Tooltip content={<Tip/>}/><Legend wrapperStyle={{fontSize:11}}/><Bar dataKey="total" name="בפועל" fill="#f97316" radius={[4,4,0,0]}/><Bar dataKey="predicted" name="תחזית" fill="#f9731650" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer></div>
