@@ -1,6 +1,6 @@
 "use client";
 // @ts-nocheck
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, AreaChart, Area, LineChart, Line, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 
 // ============================================================
@@ -198,22 +198,58 @@ export default function Dashboard() {
   const [devF, setDevF] = useState("הכל");
   const [sevF, setSevF] = useState("הכל");
   const [year, setYear] = useState<string|number>("הכל");
+  const [lastUp, setLastUp] = useState<string|null>(null);
+  const [newAlert, setNewAlert] = useState<any>(null);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const prevCountRef = useRef(0);
 
   const demoData = useMemo(() => generateDemoData(), []);
 
+  // ========== DATA FETCHING + POLLING ==========
   useEffect(() => {
+    let iv: any;
+    let mounted = true;
+
     async function load() {
       if (demo) { setData(demoData); setLoading(false); return; }
       try {
         const r = await fetch("/api/incidents?limit=1000");
-        if (r.ok) { const j = await r.json(); const l = j.incidents||j.data||j; if (Array.isArray(l)&&l.length>0) { setData(l); setLoading(false); return; } }
+        if (r.ok) {
+          const j = await r.json();
+          const list = j.incidents||j.data||j;
+          if (Array.isArray(list)&&list.length>0) {
+            if (mounted) {
+              // Detect new incidents
+              if (prevCountRef.current > 0 && list.length > prevCountRef.current) {
+                const newOnes = list.slice(0, list.length - prevCountRef.current);
+                if (newOnes.length > 0 && newOnes.length <= 5) {
+                  setNewAlert(newOnes[0]);
+                  setAlertVisible(true);
+                  setTimeout(() => setAlertVisible(false), 15000);
+                }
+              }
+              prevCountRef.current = list.length;
+              setData(list);
+              setLastUp(new Date().toISOString());
+              setLoading(false);
+            }
+            return;
+          }
+        }
       } catch {}
-      // fallback to demo
-      setDemo(true);
-      setData(demoData);
-      setLoading(false);
+      if (mounted && loading) {
+        // fallback to demo only on first load failure
+        setDemo(true);
+        setData(demoData);
+        setLoading(false);
+      }
     }
     load();
+    // Poll every 2 minutes in LIVE mode
+    if (!demo) {
+      iv = setInterval(load, 2 * 60_000);
+    }
+    return () => { mounted = false; if (iv) clearInterval(iv); };
   }, [demo, demoData]);
 
   const years = useMemo(() => Array.from(new Set(data.map(i => new Date(i.incident_date).getFullYear()))).sort((a,b)=>b-a), [data]);
@@ -305,6 +341,13 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {/* NOTIFICATION BELL */}
+            {!demo && lastUp && (
+              <div style={{position:"relative",cursor:"pointer"}} onClick={()=>{if(newAlert){setSelInc(newAlert);setAlertVisible(false);}}}>
+                <span style={{fontSize:20,filter:alertVisible?"drop-shadow(0 0 8px rgba(239,68,68,.8))":"none"}}>🔔</span>
+                {alertVisible && <div style={{position:"absolute",top:-2,right:-2,width:10,height:10,borderRadius:"50%",background:"#ef4444",border:"2px solid #0a0a1a",animation:"pulse 1s infinite"}}/>}
+              </div>
+            )}
             {/* DEMO TOGGLE - BIG & OBVIOUS */}
             <button onClick={()=>{setDemo(!demo);setLoading(true);}} style={{position:"relative",
               padding:"8px 18px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
@@ -318,11 +361,34 @@ export default function Dashboard() {
           </div>
         </div>
         <div style={{fontSize:10,color:"#57534e",marginTop:5}}>
-          {demo ? <span style={{color:"#f97316"}}>מצב הדגמה — {data.length} אירועים לדוגמה (2019-2026)</span> : <>{data.length} אירועים אמיתיים מ-Supabase</>}
+          {demo ? <span style={{color:"#f97316"}}>מצב הדגמה — {data.length} אירועים לדוגמה (2019-2026)</span> : <>{data.length} אירועים מ-Supabase {lastUp && <span style={{color:"#22c55e"}}>• עודכן {new Date(lastUp).toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"})}</span>}</>}
           {" • "}{now.toLocaleDateString("he-IL")}
           {year!=="הכל"&&<span style={{color:"#f97316",fontWeight:700}}>{" "}• שנת {year}</span>}
         </div>
       </header>
+
+      {/* NEW INCIDENT ALERT TOAST */}
+      {alertVisible && newAlert && (
+        <div onClick={()=>{setSelInc(newAlert);setAlertVisible(false);}} style={{
+          position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",zIndex:200,
+          width:"calc(100% - 32px)",maxWidth:480,
+          padding:"14px 18px",borderRadius:16,cursor:"pointer",
+          background:"linear-gradient(135deg,rgba(239,68,68,.95),rgba(249,115,22,.9))",
+          border:"1px solid rgba(255,255,255,.15)",
+          boxShadow:"0 8px 40px rgba(239,68,68,.4)",
+          animation:"slideDown .4s ease",
+        }}>
+          <style>{`@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:24}}>🚨</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#fff",marginBottom:2}}>אירוע חדש נכנס למערכת!</div>
+              <div style={{fontSize:11,color:"rgba(255,255,255,.8)",lineHeight:1.4}}>{newAlert.city} — {newAlert.description?.slice(0,60)}...</div>
+            </div>
+            <button onClick={(e)=>{e.stopPropagation();setAlertVisible(false);}} style={{background:"rgba(255,255,255,.15)",border:"none",borderRadius:8,padding:"4px 8px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+          </div>
+        </div>
+      )}
 
       <main style={{padding:"0 14px 110px",position:"relative",zIndex:10}}>
 
@@ -517,6 +583,9 @@ export default function Dashboard() {
                 {l:"הרוגים",v:data.reduce((s,i)=>s+(i.fatalities||0),0),ok:true},
                 {l:"פצועים",v:data.reduce((s,i)=>s+(i.injuries||0),0),ok:true},
                 {l:"שנים",v:`${years[years.length-1]||"?"} — ${years[0]||"?"}`,ok:true},
+                {l:"עדכון אחרון",v:lastUp?new Date(lastUp).toLocaleString("he-IL"):"—",ok:!!lastUp},
+                {l:"Polling",v:demo?"כבוי (DEMO)":"כל 2 דקות",ok:!demo},
+                {l:"התראות",v:newAlert?"פעיל — אירוע אחרון זוהה":"ממתין",ok:!!newAlert},
               ].map(s=>(<div key={s.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,.02)",marginBottom:4}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:6,height:6,borderRadius:"50%",background:s.ok?"#22c55e":"#f59e0b"}}/><span style={{fontSize:12,color:"#94a3b8"}}>{s.l}</span></div><span style={{fontSize:12,fontWeight:600}}>{s.v}</span></div>))}
             </Glass>
           </div>
