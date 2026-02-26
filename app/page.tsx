@@ -18,15 +18,14 @@ const MH = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני
 // ==================== DEMO DATA ====================
 function generateDemoData() {
   const cities = [
-    {c:"תל אביב",d:"דן",lat:32.08,lng:34.78},{c:"חיפה",d:"חוף",lat:32.79,lng:34.99},{c:"ירושלים",d:"ירושלים",lat:31.77,lng:35.21},
-    {c:"באר שבע",d:"דרום",lat:31.25,lng:34.79},{c:"ראשון לציון",d:"מרכז",lat:31.97,lng:34.80},{c:"פתח תקווה",d:"דן",lat:32.09,lng:34.88},
-    {c:"נתניה",d:"שרון",lat:32.33,lng:34.86},{c:"אשדוד",d:"דרום",lat:31.80,lng:34.65},{c:"בני ברק",d:"דן",lat:32.08,lng:34.83},
-    {c:"חולון",d:"דן",lat:32.01,lng:34.78},{c:"רמת גן",d:"דן",lat:32.07,lng:34.81},{c:"אשקלון",d:"דרום",lat:31.67,lng:34.57},
-    {c:"הרצליה",d:"שרון",lat:32.16,lng:34.78},{c:"כפר סבא",d:"שרון",lat:32.17,lng:34.91},{c:"רחובות",d:"מרכז",lat:31.89,lng:34.81},
-    {c:"בת ים",d:"דן",lat:32.02,lng:34.75},{c:"לוד",d:"מרכז",lat:31.95,lng:34.90},{c:"נצרת",d:"צפון",lat:32.70,lng:35.30},
-    {c:"עכו",d:"צפון",lat:32.93,lng:35.08},{c:"כוכב יעקב",d:'יו"ש',lat:31.83,lng:35.27},{c:"קריית אתא",d:"חוף",lat:32.80,lng:35.11},
-    {c:"אילת",d:"דרום",lat:29.56,lng:34.95},{c:"הוד השרון",d:"שרון",lat:32.15,lng:34.89},{c:"נהריה",d:"צפון",lat:33.00,lng:35.10},
-    {c:"מודיעין",d:"מרכז",lat:31.89,lng:35.01},{c:"רעננה",d:"שרון",lat:32.18,lng:34.87},{c:"טבריה",d:"צפון",lat:32.79,lng:35.53},
+    {c:"תל אביב",d:"דן",w:18},{c:"פתח תקווה",d:"דן",w:8},{c:"בני ברק",d:"דן",w:8},{c:"חולון",d:"דן",w:7},
+    {c:"בת ים",d:"דן",w:6},{c:"רמת גן",d:"דן",w:7},{c:"גבעתיים",d:"דן",w:4},{c:"הרצליה",d:"שרון",w:4},
+    {c:"ראשון לציון",d:"מרכז",w:7},{c:"רחובות",d:"מרכז",w:4},{c:"לוד",d:"מרכז",w:3},{c:"רמלה",d:"מרכז",w:3},
+    {c:"מודיעין",d:"מרכז",w:2},{c:"נתניה",d:"שרון",w:4},{c:"כפר סבא",d:"שרון",w:3},{c:"רעננה",d:"שרון",w:2},
+    {c:"הוד השרון",d:"שרון",w:2},{c:"חיפה",d:"חוף",w:5},{c:"קריית אתא",d:"חוף",w:1},{c:"ירושלים",d:"ירושלים",w:8},{c:"בית שמש",d:"ירושלים",w:3},{c:"מבשרת ציון",d:"ירושלים",w:1},{c:"מעלה אדומים",d:"ירושלים",w:2},
+    {c:"אשדוד",d:"דרום",w:3},{c:"באר שבע",d:"דרום",w:3},{c:"אשקלון",d:"דרום",w:2},{c:"אילת",d:"דרום",w:1},
+    {c:"נצרת",d:"צפון",w:1},{c:"עכו",d:"צפון",w:0.5},{c:"טבריה",d:"צפון",w:0.5},{c:"נהריה",d:"צפון",w:0.5},
+    {c:"כוכב יעקב",d:'יו"ש',w:1},{c:"אריאל",d:'יו"ש',w:0.5},
   ];
 
   const devWeights = [
@@ -36,9 +35,10 @@ function generateDemoData() {
   const sevWeights = [{s:"קל",w:25},{s:"בינוני",w:35},{s:"חמור",w:30},{s:"קריטי",w:10}];
 
   function pick(arr: any[],wKey="w") { const total = arr.reduce((s:number,x:any)=>s+x[wKey],0); let r=Math.random()*total; for(const x of arr){r-=x[wKey];if(r<=0)return x;} return arr[arr.length-1]; }
+  function pickCity(arr: any[]) { const total = arr.reduce((s:number,x:any)=>s+x.w,0); let r=Math.random()*total; for(const x of arr){r-=x.w;if(r<=0)return x;} return arr[0]; }
 
   // Yearly growth: 2019=85, growing ~25-35% per year
-  const yearCounts: Record<number,number> = {2019:85,2020:110,2021:142,2022:178,2023:215,2024:268,2025:312,2026:58};
+  const yearCounts: Record<number,number> = {2019:85,2020:112,2021:148,2022:185,2023:222,2024:252,2025:245,2026:42};
   const incidents: any[] = [];
   let id = 1;
 
@@ -80,7 +80,7 @@ function generateDemoData() {
     for (let j = 0; j < remaining; j++) {
       const m = Math.floor(Math.random() * 12) + 1;
       const d = Math.floor(Math.random() * 28) + 1;
-      const city = cities[Math.floor(Math.random() * cities.length)];
+      const city = pickCity(cities);
       const dev = pick(devWeights);
       const sev = pick(sevWeights);
 
@@ -140,7 +140,7 @@ function generateTrends(data: any[]) {
 
   return {
     growthRate,
-    predicted2026: Math.round(byYear[lastFull]?.total * 1.2),
+    predicted2026: Math.round(byYear[lastFull]?.total * 1.02),
     topDevice: topDevice?.[0] || "אופניים חשמליים",
     topDevicePct,
     summerPct,
@@ -148,7 +148,7 @@ function generateTrends(data: any[]) {
     avgInjPerEvent: (data.reduce((s,i)=>s+(i.injuries||0),0) / data.length).toFixed(1),
     nightPct: 42, // simulated - charging at night
     insights: [
-      { icon:"📈", title:"מגמת עלייה מתמדת", text:`עלייה של ${growthRate}% באירועים בשנה האחרונה. הקצב מואץ עקב גידול בשימוש ברכבים חשמליים ומיקרו-ניידות`, risk:"high" },
+      { icon:"📈", title:"מגמת עלייה מתמדת", text:`שינוי של ${growthRate}% באירועים בשנה האחרונה. לאחר שנים של עלייה חדה, נרשמה התייצבות — ככל הנראה בעקבות חקיקה ואכיפה מוגברת`, risk:"high" },
       { icon:"🚲", title:`${topDevice?.[0] || "אופניים חשמליים"} — ${topDevicePct}% מהאירועים`, text:"אופניים חשמליים ממשיכים להוביל בשריפות. סוללות מזויפות ומטענים לא תקניים הם הגורם המרכזי", risk:"critical" },
       { icon:"🌡️", title:`${summerPct}% מהאירועים בקיץ`, text:"חודשי הקיץ (יוני-ספטמבר) מציגים שיא באירועים עקב חום קיצוני שמזרז Thermal Runaway", risk:"high" },
       { icon:"🌙", title:"42% מההתלקחויות בלילה", text:"טעינת לילה ללא השגחה היא הגורם העיקרי לשריפות קטלניות. זמן תגובה ארוך יותר בלילה", risk:"critical" },
@@ -242,12 +242,18 @@ export default function Dashboard() {
     data.forEach(i=>{const y2=new Date(i.incident_date).getFullYear();const k=String(y2);if(!byYr[k])byYr[k]={year:y2,total:0,fatalities:0,injuries:0};byYr[k].total++;byYr[k].fatalities+=i.fatalities||0;byYr[k].injuries+=i.injuries||0;});
     const yrData = Object.values(byYr).sort((a,b)=>a.year-b.year);
 
-    // Prediction line
-    const yrPred = yrData.map(y => ({...y, predicted: null as number|null}));
-    const lastFull = yrPred.find(y => y.year === 2025);
-    if (lastFull) {
-      yrPred.push({ year:2026, total: 58, fatalities: 2, injuries: 45, predicted: Math.round(lastFull.total*1.18) });
-      yrPred.push({ year:2027, total: 0, fatalities: 0, injuries: 0, predicted: Math.round(lastFull.total*1.38) });
+    // Yearly with prediction
+    const yrPred = yrData.map(y => ({...y, predicted: 0}));
+    // Add 2026 full-year estimate and 2027 prediction
+    const last2025 = yrData.find(y => y.year === 2025);
+    const last2024 = yrData.find(y => y.year === 2024);
+    if (last2025) {
+      // Remove partial 2026 if exists
+      const idx26 = yrPred.findIndex(y => y.year === 2026);
+      if (idx26 >= 0) yrPred.splice(idx26, 1);
+      yrPred.push({ year:2026, total:0, fatalities:0, injuries:0, predicted: Math.round(last2025.total * 0.98) });
+      yrPred.push({ year:2027, total:0, fatalities:0, injuries:0, predicted: Math.round(last2025.total * 1.02) });
+    }
     }
 
     const byCity: Record<string,{c:number,f:number,inj:number}>={};
@@ -300,9 +306,9 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            {/* DEMO TOGGLE */}
-            <button onClick={()=>{setDemo(!demo);setLoading(true);}} style={{
-              padding:"6px 14px",borderRadius:12,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
+            {/* DEMO TOGGLE - BIG & OBVIOUS */}
+            <button onClick={()=>{setDemo(!demo);setLoading(true);}} style={{position:"relative",
+              padding:"8px 18px",borderRadius:14,border:"1px solid",cursor:"pointer",fontSize:11,fontWeight:700,
               borderColor:demo?"#f97316":"rgba(34,197,94,.4)",
               background:demo?"rgba(249,115,22,.15)":"rgba(34,197,94,.08)",
               color:demo?"#f97316":"#22c55e",
@@ -362,9 +368,10 @@ export default function Dashboard() {
 
             {/* YEARLY + PREDICTION */}
             <Glass>
+            <Glass>
               <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>📈 מגמה שנתית + תחזית</div>
-              <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>קו מקווקו = תחזית לפי קצב צמיחה</div>
-              <div style={{height:220}}><ResponsiveContainer><LineChart data={S.yrPred}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)"/><XAxis dataKey="year" tick={{fontSize:11,fill:"#64748b"}}/><YAxis tick={{fontSize:11,fill:"#64748b"}}/><Tooltip content={<Tip/>}/><Legend wrapperStyle={{fontSize:11}}/><Line type="monotone" dataKey="total" name="בפועל" stroke="#f97316" strokeWidth={3} dot={{r:5,fill:"#f97316"}}/><Line type="monotone" dataKey="predicted" name="תחזית" stroke="#f97316" strokeWidth={2} strokeDasharray="8 4" dot={{r:4,fill:"#f9731640"}}/></LineChart></ResponsiveContainer></div>
+              <div style={{fontSize:11,color:"#64748b",marginBottom:12}}>עמודות מלאות = בפועל | עמודות מקווקוות = תחזית</div>
+              <div style={{height:240}}><ResponsiveContainer><BarChart data={S.yrPred}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.04)"/><XAxis dataKey="year" tick={{fontSize:11,fill:"#64748b"}}/><YAxis tick={{fontSize:11,fill:"#64748b"}}/><Tooltip content={<Tip/>}/><Legend wrapperStyle={{fontSize:11}}/><Bar dataKey="total" name="בפועל" fill="#f97316" radius={[4,4,0,0]}/><Bar dataKey="predicted" name="תחזית" fill="#f9731650" radius={[4,4,0,0]}/></BarChart></ResponsiveContainer></div>
             </Glass>
 
             {fatal.length>0&&(<Glass style={{borderColor:"rgba(239,68,68,.15)"}}>
