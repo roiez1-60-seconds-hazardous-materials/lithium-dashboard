@@ -706,8 +706,7 @@ export default function Dashboard() {
             <Glass><div style={{display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",padding:"16px 10px",gap:8}}>
               <div style={{fontSize:12,color:"#475569"}}>פותח ותוכנן על ידי</div>
               <div style={{fontSize:16,fontWeight:800,background:"linear-gradient(135deg,#f97316,#fbbf24)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>רועי צוקרמן</div>
-              <div style={{fontSize:11,color:"#3f3f46"}}>כבאות והצלה לישראל • 2024—2026</div>
-            </Glass>
+            </div></Glass>
           </div>
         )}
       </main>
