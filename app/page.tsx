@@ -188,6 +188,16 @@ function Glass({children,style={}}:any) {
 
 const TABS = [{id:"home",icon:"🏠",label:"ראשי"},{id:"chart",icon:"📊",label:"גרפים"},{id:"trends",icon:"🧠",label:"מגמות"},{id:"list",icon:"📋",label:"אירועים"},{id:"system",icon:"⚙️",label:"מערכת"}];
 
+// ==================== PUSH HELPERS ====================
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) { outputArray[i] = rawData.charCodeAt(i); }
+  return outputArray;
+}
+
 // ============================================================
 export default function Dashboard() {
   const [tab, setTab] = useState("home");
@@ -202,6 +212,77 @@ export default function Dashboard() {
   const [newAlert, setNewAlert] = useState<any>(null);
   const [alertVisible, setAlertVisible] = useState(false);
   const prevCountRef = useRef(0);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+
+  // ========== PUSH NOTIFICATION SETUP ==========
+  useEffect(() => {
+    // Inject manifest for PWA
+    if (!document.querySelector('link[rel="manifest"]')) {
+      const link = document.createElement('link');
+      link.rel = 'manifest';
+      link.href = '/manifest.json';
+      document.head.appendChild(link);
+    }
+    // Add theme-color meta
+    if (!document.querySelector('meta[name="theme-color"]')) {
+      const meta = document.createElement('meta');
+      meta.name = 'theme-color';
+      meta.content = '#0a0a1a';
+      document.head.appendChild(meta);
+    }
+    // Check if already subscribed
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker.getRegistration().then(reg => {
+        if (reg) {
+          reg.pushManager.getSubscription().then(sub => {
+            if (sub) setPushEnabled(true);
+          });
+        }
+      });
+    }
+  }, []);
+
+  const togglePush = useCallback(async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert('הדפדפן לא תומך בהתראות Push. נסה Chrome או Edge.');
+      return;
+    }
+    setPushLoading(true);
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+
+      if (pushEnabled) {
+        // Unsubscribe
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await fetch('/api/push/subscribe', { method: 'DELETE', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: sub.endpoint }) });
+          await sub.unsubscribe();
+        }
+        setPushEnabled(false);
+      } else {
+        // Subscribe
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          alert('צריך לאשר התראות כדי לקבל עדכונים');
+          setPushLoading(false);
+          return;
+        }
+        const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || 'BJGFnmaGA7XTj_aJjxgbPAKgAVZyVaoYLV94H3-5D6Ei2jCT898jHzDPU8BcUbqXFVVaBHFyBQPXlQCml45-rpY';
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        });
+        await fetch('/api/push/subscribe', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ endpoint: sub.endpoint, keys: sub.toJSON().keys }) });
+        setPushEnabled(true);
+      }
+    } catch (err) {
+      console.error('Push toggle error:', err);
+      alert('שגיאה בהפעלת התראות: ' + (err as any)?.message);
+    }
+    setPushLoading(false);
+  }, [pushEnabled]);
 
   const demoData = useMemo(() => generateDemoData(), []);
 
@@ -341,6 +422,19 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {/* PUSH NOTIFICATION TOGGLE */}
+            {!demo && (
+              <button onClick={togglePush} disabled={pushLoading} style={{
+                padding:"6px 10px",borderRadius:10,border:"1px solid",cursor:pushLoading?"wait":"pointer",
+                borderColor:pushEnabled?"rgba(34,197,94,.4)":"rgba(255,255,255,.1)",
+                background:pushEnabled?"rgba(34,197,94,.1)":"rgba(255,255,255,.03)",
+                color:pushEnabled?"#22c55e":"#64748b",fontSize:11,fontWeight:600,
+                display:"flex",alignItems:"center",gap:4,
+              }}>
+                {pushLoading ? "⏳" : pushEnabled ? "🔔" : "🔕"}
+                <span style={{fontSize:9}}>{pushEnabled?"Push פעיל":"הפעל Push"}</span>
+              </button>
+            )}
             {/* NOTIFICATION BELL */}
             {!demo && lastUp && (
               <div style={{position:"relative",cursor:"pointer"}} onClick={()=>{if(newAlert){setSelInc(newAlert);setAlertVisible(false);}}}>
@@ -586,6 +680,7 @@ export default function Dashboard() {
                 {l:"עדכון אחרון",v:lastUp?new Date(lastUp).toLocaleString("he-IL"):"—",ok:!!lastUp},
                 {l:"Polling",v:demo?"כבוי (DEMO)":"כל 2 דקות",ok:!demo},
                 {l:"התראות",v:newAlert?"פעיל — אירוע אחרון זוהה":"ממתין",ok:!!newAlert},
+                {l:"Push Notifications",v:pushEnabled?"✅ מופעל — התראות לטלפון":"❌ כבוי",ok:pushEnabled},
               ].map(s=>(<div key={s.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,.02)",marginBottom:4}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:6,height:6,borderRadius:"50%",background:s.ok?"#22c55e":"#f59e0b"}}/><span style={{fontSize:12,color:"#94a3b8"}}>{s.l}</span></div><span style={{fontSize:12,fontWeight:600}}>{s.v}</span></div>))}
             </Glass>
           </div>
