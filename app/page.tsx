@@ -683,6 +683,31 @@ export default function Dashboard() {
                 {l:"Push Notifications",v:pushEnabled?"✅ מופעל — התראות לטלפון":"❌ כבוי",ok:pushEnabled},
               ].map(s=>(<div key={s.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,.02)",marginBottom:4}}><div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:6,height:6,borderRadius:"50%",background:s.ok?"#22c55e":"#f59e0b"}}/><span style={{fontSize:12,color:"#94a3b8"}}>{s.l}</span></div><span style={{fontSize:12,fontWeight:600}}>{s.v}</span></div>))}
             </Glass>
+            <Glass><div style={{fontSize:14,fontWeight:700,marginBottom:10}}>📡 מקורות מידע</div>
+              <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.7,marginBottom:12}}>המערכת אוספת נתונים ממגוון מקורות בעברית ובאנגלית באמצעות Gemini AI:</div>
+              {[
+                {cat:"🔴 אתרי חדשות ישראליים",items:"ynet, כלכליסט, הארץ, וואלה!, מאקו, זמן ישראל, ערוץ 13, ערוץ 12, כאן 11"},
+                {cat:"🟠 מקורות רשמיים",items:"כבאות והצלה לישראל — הודעות רשמיות ודיווחי אירועים, משרד להגנת הסביבה"},
+                {cat:"🟡 רשתות חברתיות",items:"טוויטר/X, פייסבוק — דיווחי אזרחים ומקורות ראשוניים"},
+                {cat:"🔵 מקורות באנגלית",items:"Times of Israel, Jerusalem Post, Israel National News"},
+                {cat:"🟣 מקורות מקצועיים",items:"EV FireSafe (אוסטרליה), UL Solutions, NFPA — נתוני השוואה בינלאומיים"},
+              ].map(s=>(<div key={s.cat} style={{marginBottom:10,padding:"10px 12px",borderRadius:10,background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.04)"}}><div style={{fontSize:12,fontWeight:700,marginBottom:4}}>{s.cat}</div><div style={{fontSize:11,color:"#64748b",lineHeight:1.6}}>{s.items}</div></div>))}
+              <div style={{fontSize:11,color:"#475569",lineHeight:1.6,marginTop:6,padding:"8px 10px",borderRadius:8,background:"rgba(249,115,22,.04)",border:"1px solid rgba(249,115,22,.1)"}}>🔄 סריקה מתבצעת כל 6 שעות (Cron) + אפשרות סריקה ידנית דרך <span style={{fontFamily:"monospace",fontSize:10,background:"rgba(255,255,255,.06)",padding:"1px 5px",borderRadius:4}}>/api/scan</span></div>
+            </Glass>
+            <Glass><div style={{fontSize:14,fontWeight:700,marginBottom:10}}>⚠️ אזהרות שימוש</div>
+              {[
+                "הנתונים במערכת נאספים באופן אוטומטי ממקורות פתוחים ועשויים להכיל אי-דיוקים. יש לאמת מידע קריטי מול מקורות רשמיים.",
+                "המערכת אינה מהווה תחליף לדיווח רשמי של כבאות והצלה או גופי ביטחון אחרים.",
+                "סיווג סוג המכשיר, חומרת האירוע והמיקום מבוססים על ניתוח AI ועשויים להיות שגויים.",
+                "אירועים מוצלבים אוטומטית למניעת כפילויות, אך ייתכנו מקרים של אירועים כפולים או חסרים.",
+                "המערכת מיועדת לשימוש מחקרי ותפעולי פנימי בלבד ואינה מיועדת להפצה ציבורית.",
+              ].map((w,i)=>(<div key={i} style={{display:"flex",gap:8,padding:"8px 10px",borderRadius:8,background:"rgba(251,191,36,.03)",marginBottom:4,border:"1px solid rgba(251,191,36,.06)"}}><span style={{fontSize:14,flexShrink:0}}>⚠️</span><span style={{fontSize:11,color:"#94a3b8",lineHeight:1.6}}>{w}</span></div>))}
+            </Glass>
+            <Glass><div style={{display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",padding:"16px 10px",gap:8}}>
+              <div style={{fontSize:12,color:"#475569"}}>פותח ותוכנן על ידי</div>
+              <div style={{fontSize:16,fontWeight:800,background:"linear-gradient(135deg,#f97316,#fbbf24)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>רועי צוקרמן</div>
+              <div style={{fontSize:11,color:"#3f3f46"}}>כבאות והצלה לישראל • 2024—2026</div>
+            </Glass>
           </div>
         )}
       </main>
